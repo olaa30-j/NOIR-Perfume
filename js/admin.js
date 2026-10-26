@@ -1,6 +1,7 @@
 /* ============================================================
-   NOIR — admin dashboard (Supabase-aware)
-   All writes go to Supabase first; localStorage acts as cache.
+   NOIR — admin dashboard (Supabase ONLY)
+   All writes go directly to Supabase. No localStorage fallback.
+   + Session check (localStorage + Supabase Auth)
    ============================================================ */
 
 /* ---------- STATE ---------- */
@@ -31,6 +32,69 @@ function adminDB() {
   return typeof NOIR_DB !== 'undefined' && NOIR_DB ? NOIR_DB : {
     products: [], orders: [], bundles: [], customers: [], settings: { language: 'en', radius: 6 },
   };
+}
+
+/* ============================================================
+   SESSION CHECK (localStorage + Supabase Auth)
+   Returns session object or null.
+   ============================================================ */
+async function adminCheckSession() {
+  // 1. Try localStorage
+  let session = (typeof noirGetSession === 'function') ? noirGetSession() : null;
+  console.info('[admin] localStorage session:', session);
+
+  // 2. If missing, try Supabase Auth
+  if (!session && window.db && window.db.auth) {
+    try {
+      const { data } = await window.db.auth.getSession();
+      if (data && data.session) {
+        const user = data.session.user;
+        const email = user.email || '';
+        const role = email === 'admin@gmail.com' ? 'admin' : 'customer';
+        session = {
+          email,
+          role,
+          name: (user.user_metadata && user.user_metadata.name) || email.split('@')[0],
+          at: Date.now(),
+          source: 'supabase',
+          userId: user.id,
+        };
+        if (typeof noirSetSession === 'function') noirSetSession(session);
+        console.info('[admin] recovered session from Supabase:', session);
+      }
+    } catch (e) {
+      console.error('[admin] getSession failed:', e);
+    }
+  }
+
+  if (!session) return null;
+  if (session.role !== 'admin') return null;
+  return session;
+}
+
+/* ---------- UPDATE TOPBAR ---------- */
+function adminUpdateTopbar(session) {
+  const el = document.getElementById('admin-name');
+  if (!el) return;
+  if (!session) {
+    el.innerHTML = 'Guest<br><small>Not signed in</small>';
+    return;
+  }
+  el.innerHTML = adminEsc(session.name || 'Admin') +
+    '<br><small>' + adminEsc(session.email || '—') + ' · ' + adminEsc(session.role || 'admin') + '</small>';
+}
+
+/* ---------- SIGN OUT ---------- */
+async function adminSignOut() {
+  if (typeof noirLogout === 'function') {
+    await noirLogout('index.html');
+    return;
+  }
+  try { localStorage.removeItem('NOIR_SESSION'); } catch (e) {}
+  if (window.db && window.db.auth) {
+    try { await window.db.auth.signOut(); } catch (e) {}
+  }
+  location.href = 'index.html';
 }
 
 /* ---------- ROUTER ---------- */
@@ -170,7 +234,7 @@ function renderSettingsAdmin() {
   const dbReady = (typeof noirHasSupabase === 'function' && noirHasSupabase());
   return `<div class="admin-page-heading"><div><h2>Store settings</h2><p>Appearance, language and data.</p></div></div>
   <section class="admin-panel"><h3>Appearance</h3><div class="admin-setting-row"><label for="admin-lang-select">Language</label><select id="admin-lang-select" class="admin-search"><option value="en" ${lang === 'en' ? 'selected' : ''}>English</option><option value="ar" ${lang === 'ar' ? 'selected' : ''}>العربية</option></select></div><div class="admin-setting-row"><label for="admin-radius-input">Corner radius — <span id="radius-value">${radius}px</span></label><input id="admin-radius-input" type="range" min="0" max="24" step="1" value="${radius}"></div></section>
-  <section class="admin-panel"><h3>Database</h3><div class="settings-note"><strong style="color:var(--gold-light)">Status:</strong> ${dbReady ? '<span style="color:#8fd4a8">✅ Supabase configured</span>' : '<span style="color:#e5c58b">⚠ Local mode (no Supabase)</span>'}<br><br>${dbReady ? 'Data is stored in Supabase and cached in your browser.' : 'Supabase is not configured. Add your URL and key in <code>js/config.js</code>.'}</div><button class="button button-outline" id="admin-reload-data" style="margin-top:12px">Reload from database</button><button class="button button-outline" id="admin-reset-data" style="margin-top:12px;margin-left:8px">Reset local cache</button></section>
+  <section class="admin-panel"><h3>Database</h3><div class="settings-note"><strong style="color:var(--gold-light)">Status:</strong> ${dbReady ? '<span style="color:#8fd4a8">✅ Connected to Supabase</span>' : '<span style="color:#e7a4a4">❌ Not connected</span>'}<br><br>${dbReady ? 'All data is stored in Supabase (PostgreSQL).' : 'Supabase is not configured. Add URL and key in <code>js/config.js</code>.'}</div><button class="button button-outline" id="admin-reload-data" style="margin-top:12px">Reload from database</button></section>
   <section class="admin-panel"><h3>About</h3><div class="settings-note"><strong style="color:var(--gold-light)">Authentication</strong><br>Admin: <code>admin@gmail.com</code> / <code>admin</code><br><br><strong style="color:var(--gold-light)">Production</strong><br>Add server-side validation and a payment provider before going live.</div></section>`;
 }
 
@@ -221,38 +285,52 @@ async function saveAdminProduct(form) {
     offer,
   };
 
-  if (!product.name || !product.subtitle || !product.price) { adminToast('Please enter valid product details.'); return; }
-
-  if (current) {
-    NOIR_DB.products = NOIR_DB.products.map(p => p.id === current.id ? product : p);
-  } else {
-    NOIR_DB.products.unshift(product);
-  }
-  if (typeof noirStoreSave === 'function') noirStoreSave(NOIR_DB);
-
-  if (typeof noirSaveProductToDB === 'function') {
-    const ok = await noirSaveProductToDB(product);
-    if (ok) adminToast(current ? 'Product updated in database' : 'Product added to database');
-    else if (typeof noirHasSupabase === 'function' && noirHasSupabase()) adminToast('Saved locally — Supabase sync failed');
-    else adminToast(current ? 'Product updated' : 'Product added');
-  } else {
-    adminToast(current ? 'Product updated' : 'Product added');
+  if (!product.name || !product.subtitle || !product.price) {
+    adminToast('Please enter valid product details.');
+    return;
   }
 
-  renderAdmin('products');
-  if (typeof renderProducts === 'function' && document.getElementById('product-grid')) renderProducts();
+  if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
+    adminToast('❌ Supabase not configured. Cannot save.');
+    return;
+  }
+
+  const submitBtn = form.querySelector('button[type="submit"]');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+
+  try {
+    await noirSaveProductToDB(product);
+    if (current) {
+      NOIR_DB.products = NOIR_DB.products.map(p => p.id === current.id ? product : p);
+    } else {
+      NOIR_DB.products.unshift(product);
+    }
+    adminToast(current ? '✅ Product updated in database' : '✅ Product added to database');
+    renderAdmin('products');
+    if (typeof renderProducts === 'function' && document.getElementById('product-grid')) renderProducts();
+  } catch (err) {
+    console.error('[admin] save failed:', err);
+    adminToast('❌ Save failed: ' + (err.message || 'Unknown error'));
+  } finally {
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save product'; }
+  }
 }
 
 /* ---------- ORDER STATUS ---------- */
 async function updateOrderStatus(id, status) {
-  const db = adminDB();
-  const order = db.orders.find(o => o.id === id);
-  if (!order) return;
-  order.status = status;
-  if (typeof noirStoreSave === 'function') noirStoreSave(NOIR_DB);
-  if (typeof noirUpdateOrderStatusInDB === 'function') await noirUpdateOrderStatusInDB(id, status);
-  renderAdmin('orders');
-  adminToast(`Order ${id} marked ${status.toLowerCase()}.`);
+  if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
+    adminToast('❌ Supabase not configured.');
+    return;
+  }
+  try {
+    await noirUpdateOrderStatusInDB(id, status);
+    const order = NOIR_DB.orders.find(o => o.id === id);
+    if (order) order.status = status;
+    renderAdmin('orders');
+    adminToast(`✅ Order ${id} marked ${status.toLowerCase()} in database.`);
+  } catch (err) {
+    adminToast('❌ Update failed: ' + (err.message || 'Unknown error'));
+  }
 }
 
 /* ---------- BUNDLE FORM ---------- */
@@ -296,31 +374,45 @@ async function saveBundle(form) {
   };
   if (!bundle.name || !bundle.price) { adminToast('Please fill all bundle fields.'); return; }
 
-  if (current) {
-    NOIR_DB.bundles = NOIR_DB.bundles.map(b => b.id === current.id ? bundle : b);
-  } else {
-    NOIR_DB.bundles.unshift(bundle);
-  }
-  if (typeof noirStoreSave === 'function') noirStoreSave(NOIR_DB);
-
-  if (typeof noirSaveBundleToDB === 'function') {
-    const ok = await noirSaveBundleToDB(bundle);
-    if (ok) adminToast(current ? 'Bundle updated in database' : 'Bundle added to database');
-    else if (typeof noirHasSupabase === 'function' && noirHasSupabase()) adminToast('Saved locally — Supabase sync failed');
-    else adminToast(current ? 'Bundle updated' : 'Bundle added');
-  } else {
-    adminToast(current ? 'Bundle updated' : 'Bundle added');
+  if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
+    adminToast('❌ Supabase not configured. Cannot save.');
+    return;
   }
 
-  renderAdmin('bundles');
-  if (typeof renderBundles === 'function' && document.getElementById('bundles-grid')) renderBundles();
+  const submitBtn = form.querySelector('button[type="submit"]');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+
+  try {
+    await noirSaveBundleToDB(bundle);
+    if (current) {
+      NOIR_DB.bundles = NOIR_DB.bundles.map(b => b.id === current.id ? bundle : b);
+    } else {
+      NOIR_DB.bundles.unshift(bundle);
+    }
+    adminToast(current ? '✅ Bundle updated in database' : '✅ Bundle added to database');
+    renderAdmin('bundles');
+  } catch (err) {
+    adminToast('❌ Save failed: ' + (err.message || 'Unknown error'));
+  } finally {
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save bundle'; }
+  }
 }
 
 /* ---------- LISTENERS ---------- */
 document.addEventListener('DOMContentLoaded', function () {
+  // Nav
   document.querySelectorAll('.admin-nav[data-panel]').forEach(b =>
     b.addEventListener('click', () => renderAdmin(b.dataset.panel))
   );
+
+  // Sign out & return
+  const back = document.getElementById('back-to-store');
+  if (back) {
+    back.addEventListener('click', function (e) {
+      e.preventDefault();
+      adminSignOut();
+    });
+  }
 
   const adminContent = document.getElementById('admin-content');
   if (!adminContent) return;
@@ -342,10 +434,15 @@ document.addEventListener('DOMContentLoaded', function () {
     const delProduct = event.target.closest('[data-delete-product]');
     if (delProduct && confirm('Delete this product?')) {
       const pid = Number(delProduct.dataset.deleteProduct);
-      NOIR_DB.products = NOIR_DB.products.filter(p => p.id !== pid);
-      if (typeof noirStoreSave === 'function') noirStoreSave(NOIR_DB);
-      if (typeof noirDeleteProductFromDB === 'function') await noirDeleteProductFromDB(pid);
-      renderAdmin('products');
+      if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) { adminToast('❌ Supabase not configured.'); return; }
+      try {
+        await noirDeleteProductFromDB(pid);
+        NOIR_DB.products = NOIR_DB.products.filter(p => p.id !== pid);
+        adminToast('✅ Product deleted from database');
+        renderAdmin('products');
+      } catch (err) {
+        adminToast('❌ Delete failed: ' + (err.message || 'Unknown error'));
+      }
     }
 
     if (event.target.closest('#show-bundle-form')) showBundleForm();
@@ -361,14 +458,25 @@ document.addEventListener('DOMContentLoaded', function () {
     const delBundle = event.target.closest('[data-delete-bundle]');
     if (delBundle && confirm('Delete this bundle?')) {
       const bid = Number(delBundle.dataset.deleteBundle);
-      NOIR_DB.bundles = NOIR_DB.bundles.filter(b => b.id !== bid);
-      if (typeof noirStoreSave === 'function') noirStoreSave(NOIR_DB);
-      if (typeof noirDeleteBundleFromDB === 'function') await noirDeleteBundleFromDB(bid);
-      renderAdmin('bundles');
+      if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) { adminToast('❌ Supabase not configured.'); return; }
+      try {
+        await noirDeleteBundleFromDB(bid);
+        NOIR_DB.bundles = NOIR_DB.bundles.filter(b => b.id !== bid);
+        adminToast('✅ Bundle deleted from database');
+        renderAdmin('bundles');
+      } catch (err) {
+        adminToast('❌ Delete failed: ' + (err.message || 'Unknown error'));
+      }
     }
 
-    if (event.target.id === 'admin-reload-data') { if (typeof noirLoadFromSupabase === 'function') { adminToast('Reloading from database…'); await noirLoadFromSupabase(); renderAdmin(); } }
-    if (event.target.id === 'admin-reset-data') { if (confirm('Reset local cache only? Supabase data is untouched.')) { if (typeof noirStoreReset === 'function') noirStoreReset(); location.reload(); } }
+    if (event.target.id === 'admin-reload-data') {
+      if (typeof noirLoadFromSupabase === 'function') {
+        adminToast('Reloading from database…');
+        await noirLoadFromSupabase();
+        renderAdmin();
+      }
+    }
+
     const action = event.target.closest('[data-admin-action]');
     if (action) renderAdmin(action.dataset.adminAction);
   });
@@ -393,11 +501,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
   adminContent.addEventListener('change', function (event) {
     if (event.target.matches('[data-order-status]')) updateOrderStatus(event.target.dataset.orderStatus, event.target.value);
-    if (event.target.id === 'admin-lang-select') { if (typeof noirSetLang === 'function') noirSetLang(event.target.value); renderAdmin('settings'); }
+    if (event.target.id === 'admin-lang-select') {
+      if (typeof noirSetLang === 'function') noirSetLang(event.target.value);
+      if (typeof noirSaveAppSettings === 'function') noirSaveAppSettings();
+      renderAdmin('settings');
+    }
     if (event.target.id === 'admin-radius-input') {
       const r = Number(event.target.value);
       NOIR_DB.settings.radius = r;
-      if (typeof noirStoreSave === 'function') noirStoreSave(NOIR_DB);
+      if (typeof noirSaveAppSettings === 'function') noirSaveAppSettings();
       if (window.noirApplyRadius) window.noirApplyRadius(r);
       const v = document.getElementById('radius-value');
       if (v) v.textContent = r + 'px';
@@ -405,6 +517,49 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 });
 
-window.addEventListener('noir:data-ready', function () {
-  if (typeof renderAdmin === 'function' && document.getElementById('admin-app')) renderAdmin();
+/* ---------- DATA READY ---------- */
+window.addEventListener('noir:data-ready', function (e) {
+  // Update status badge
+  const dot = document.getElementById('db-status-dot');
+  const label = document.getElementById('db-status-label');
+  if (dot && label) {
+    const source = e.detail && e.detail.source;
+    if (source === 'supabase') {
+      dot.style.background = '#4fae7a';
+      label.textContent = 'Connected to Supabase';
+    } else {
+      dot.style.background = '#c89b55';
+      label.textContent = 'Local mode (offline)';
+    }
+  }
+  // Re-render
+  if (typeof renderAdmin === 'function' && document.getElementById('admin-app')) {
+    renderAdmin();
+  }
 });
+
+/* ---------- AUTO SESSION CHECK ON LOAD ---------- */
+(function bootAdmin() {
+  const run = async () => {
+    console.info('[admin] booting…');
+    const session = await adminCheckSession();
+    adminUpdateTopbar(session);
+
+    if (!session) {
+      console.warn('[admin] no admin session — redirecting to login');
+      location.replace('login.html?role=admin&next=admin.html');
+      return;
+    }
+
+    console.info('[admin] session OK:', session.email);
+    if (typeof renderAdmin === 'function') renderAdmin('overview');
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+      setTimeout(run, 50);
+    });
+  } else {
+    setTimeout(run, 50);
+  }
+})();

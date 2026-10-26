@@ -6,6 +6,7 @@
   <meta name="description" content="NOIR admin studio — demo dashboard.">
   <title>Admin — NOIR Arabian Luxury</title>
 
+  <!-- Anti-flash theme + language + radius -->
   <script>
     (function () {
       try {
@@ -20,11 +21,11 @@
           if (p.sans) r.style.setProperty('--font-sans', '"' + p.sans + '"');
           if (p.preset) r.setAttribute('data-theme', p.preset);
         }
-        var raw2 = localStorage.getItem('noir-store-data');
-        if (raw2) {
-          var d = JSON.parse(raw2);
-          if (d.settings && d.settings.radius != null) r.style.setProperty('--radius', d.settings.radius + 'px');
-          if (d.settings && d.settings.language) { r.lang = d.settings.language; r.dir = d.settings.language === 'ar' ? 'rtl' : 'ltr'; }
+        var s = localStorage.getItem('noir-app-settings');
+        if (s) {
+          var d = JSON.parse(s);
+          if (d.radius != null) r.style.setProperty('--radius', d.radius + 'px');
+          if (d.language) { r.lang = d.language; r.dir = d.language === 'ar' ? 'rtl' : 'ltr'; }
         }
       } catch (e) {}
     })();
@@ -35,15 +36,25 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&family=Inter:wght@400;500;600&family=Libre+Baskerville:wght@400;700&family=Manrope:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
 
+  <!-- Supabase SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Config (secrets) — before supabase-client -->
   <script src="js/config.js"></script>
+
+  <!-- Client init -->
   <script src="js/supabase-client.js" defer></script>
+
+  <!-- Data layer -->
   <script src="js/store.js" defer></script>
+
+  <!-- i18n + theme + auth -->
   <script src="js/i18n.js" defer></script>
   <script src="js/theme.js" defer></script>
   <script src="js/auth.js" defer></script>
+
+  <!-- UI + admin -->
   <script src="js/app.js" defer></script>
-  <script src="js/products.js" defer></script>
   <script src="js/admin.js" defer></script>
 </head>
 <body>
@@ -75,7 +86,7 @@
         </div>
         <div class="admin-profile">
           <span class="avatar">N</span>
-          <span id="admin-name">Store admin<br><small>Demo account</small></span>
+          <span id="admin-name">Loading session…<br><small>—</small></span>
         </div>
       </header>
 
@@ -86,38 +97,123 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      const s = typeof noirGetSession === 'function' ? noirGetSession() : null;
-      if (!s || s.role !== 'admin') {
+    /* ============================================================
+       ADMIN SESSION CHECK
+       1. Read localStorage session
+       2. If missing, try Supabase Auth (getSession)
+       3. Redirect to login if neither has admin
+       4. Update UI with name + email + role
+       ============================================================ */
+    (function () {
+      function esc(str) {
+        return String(str == null ? '' : str)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      }
+
+      function updateName(name, email, role) {
+        const el = document.getElementById('admin-name');
+        if (el) {
+          el.innerHTML = esc(name || 'Admin') +
+            '<br><small>' + esc(email || '—') + ' · ' + esc(role || 'admin') + '</small>';
+        }
+      }
+
+      function redirectToLogin() {
+        console.warn('[admin] No admin session — redirecting to login');
         location.replace('login.html?role=admin&next=admin.html');
-        return;
-      }
-      const nameEl = document.getElementById('admin-name');
-      if (nameEl && typeof escapeHTML === 'function') {
-        nameEl.innerHTML = `${escapeHTML(s.name)}<br><small>${escapeHTML(s.email)}</small>`;
-      } else if (nameEl) {
-        nameEl.textContent = s.name;
       }
 
-      if (typeof renderAdmin === 'function') renderAdmin('overview');
-    });
+      async function checkSession() {
+        // 1. Try localStorage
+        let session = (typeof noirGetSession === 'function') ? noirGetSession() : null;
+        console.info('[admin] localStorage session:', session);
 
-    // Update status when data arrives
-    window.addEventListener('noir:data-ready', (e) => {
-      const dot = document.getElementById('db-status-dot');
-      const label = document.getElementById('db-status-label');
-      if (!dot || !label) return;
-      const source = e.detail && e.detail.source;
-      if (source === 'supabase') {
-        dot.style.background = '#4fae7a';
-        label.textContent = 'Connected to Supabase';
+        // 2. If no session, check Supabase
+        if (!session && window.db && window.db.auth) {
+          try {
+            const { data } = await window.db.auth.getSession();
+            if (data && data.session) {
+              const user = data.session.user;
+              const email = user.email || '';
+              const role = email === 'admin@gmail.com' ? 'admin' : 'customer';
+              session = {
+                email,
+                role,
+                name: user.user_metadata?.name || email.split('@')[0],
+                at: Date.now(),
+                source: 'supabase',
+                userId: user.id,
+              };
+              if (typeof noirSetSession === 'function') noirSetSession(session);
+              console.info('[admin] Recovered session from Supabase:', session);
+            }
+          } catch (e) {
+            console.error('[admin] Supabase getSession failed:', e);
+          }
+        }
+
+        // 3. No session at all
+        if (!session) {
+          redirectToLogin();
+          return;
+        }
+
+        // 4. Session exists but not admin
+        if (session.role !== 'admin') {
+          console.warn('[admin] Session is not admin:', session.role);
+          redirectToLogin();
+          return;
+        }
+
+        // 5. Success → update UI + render
+        updateName(session.name, session.email, session.role);
+        console.info('[admin] Admin session OK:', session.email);
+
+        if (typeof renderAdmin === 'function') {
+          try { renderAdmin('overview'); }
+          catch (e) { console.error('[admin] renderAdmin failed:', e); }
+        }
+      }
+
+      // Run after all defer scripts (auth.js, store.js, admin.js)
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () {
+          setTimeout(checkSession, 50);
+        });
       } else {
-        dot.style.background = '#c89b55';
-        label.textContent = 'Local mode (offline)';
+        setTimeout(checkSession, 50);
       }
-    });
 
-    console.info('[admin] Page loaded. Check noir:data-ready event above.');
+      // Listen for data-ready to render again
+      window.addEventListener('noir:data-ready', function (e) {
+        const dot = document.getElementById('db-status-dot');
+        const label = document.getElementById('db-status-label');
+        if (dot && label) {
+          const source = e.detail && e.detail.source;
+          if (source === 'supabase') {
+            dot.style.background = '#4fae7a';
+            label.textContent = 'Connected to Supabase';
+          } else {
+            dot.style.background = '#c89b55';
+            label.textContent = 'Local mode (offline)';
+          }
+        }
+        // Re-render so data is fresh
+        if (typeof renderAdmin === 'function') {
+          try { renderAdmin(); } catch (e) {}
+        }
+      });
+
+      // Back to store
+      document.addEventListener('click', function (e) {
+        if (e.target.id === 'back-to-store' || e.target.closest('#back-to-store')) {
+          e.preventDefault();
+          if (typeof noirLogout === 'function') noirLogout('index.html');
+          else { localStorage.removeItem('NOIR_SESSION'); location.href = 'index.html'; }
+        }
+      });
+    })();
   </script>
 </body>
 </html>

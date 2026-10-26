@@ -6,23 +6,56 @@
   <meta name="description" content="Your NOIR account.">
   <title>Account — NOIR Arabian Luxury</title>
 
-  <!-- Anti-flash: apply saved theme before CSS paints -->
+  <!-- Anti-flash theme -->
   <script>
     (function () {
-      var t = localStorage.getItem('noir-theme');
-      if (t) document.documentElement.setAttribute('data-theme', t);
+      try {
+        var raw = localStorage.getItem('noir-theme-prefs');
+        if (raw) {
+          var p = JSON.parse(raw);
+          var r = document.documentElement;
+          if (p.bg) r.style.setProperty('--bg', p.bg);
+          if (p.text) r.style.setProperty('--text', p.text);
+          if (p.accent) r.style.setProperty('--accent', p.accent);
+          if (p.serif) r.style.setProperty('--font-serif', '"' + p.serif + '"');
+          if (p.sans) r.style.setProperty('--font-sans', '"' + p.sans + '"');
+          if (p.preset) r.setAttribute('data-theme', p.preset);
+        }
+        var s = localStorage.getItem('noir-app-settings');
+        if (s) {
+          var d = JSON.parse(s);
+          if (d.radius != null) r.style.setProperty('--radius', d.radius + 'px');
+          if (d.language) { r.lang = d.language; r.dir = d.language === 'ar' ? 'rtl' : 'ltr'; }
+        }
+      } catch (e) {}
     })();
   </script>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&family=Inter:wght@400;500;600&family=Libre+Baskerville:wght@400;700&family=Manrope:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
+
+  <!-- Supabase SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Config (secrets) — must load BEFORE supabase-client -->
+  <script src="js/config.js"></script>
+
+  <!-- Client init -->
+  <script src="js/supabase-client.js" defer></script>
+
+  <!-- Data -->
+  <script src="js/store.js" defer></script>
+
+  <!-- i18n + theme + auth -->
+  <script src="js/i18n.js" defer></script>
+  <script src="js/theme.js" defer></script>
   <script src="js/auth.js" defer></script>
+
+  <!-- UI + cart -->
   <script src="js/app.js" defer></script>
-  <script src="js/products.js" defer></script>
   <script src="js/cart.js" defer></script>
-  <script src="js/page-init.js" defer></script>
 </head>
 <body>
   <div class="announcement">
@@ -34,10 +67,10 @@
     <a class="brand" href="index.html" aria-label="NOIR home"><span>NOIR</span><small>ARABIAN PERFUMES</small></a>
     <button class="icon-button menu-toggle" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
     <nav class="main-nav" id="main-nav" aria-label="Main navigation">
-      <a href="index.html">Home</a>
-      <a href="shop.html">Shop</a>
-      <a href="collections.html">Collections</a>
-      <a href="story.html">Our story</a>
+      <a href="index.html" data-i18n="nav.home">Home</a>
+      <a href="shop.html" data-i18n="nav.shop">Shop</a>
+      <a href="collections.html" data-i18n="nav.collections">Collections</a>
+      <a href="story.html" data-i18n="nav.story">Our story</a>
     </nav>
     <div class="header-actions">
       <button class="icon-button" id="search-toggle" aria-label="Search products">⌕</button>
@@ -57,7 +90,7 @@
         <a href="login.html?role=admin&next=admin.html" class="button button-outline">Admin sign in</a>
       </div>
 
-      <div id="account-signed" style="display:none;max-width:520px;margin:24px auto 0;text-align:left;border:1px solid var(--line);background:var(--panel);padding:22px;border-radius:6px">
+      <div id="account-signed" style="display:none;max-width:520px;margin:24px auto 0;text-align:left;border:1px solid var(--line);background:var(--panel);padding:22px;border-radius:var(--radius)">
         <p class="small-note" style="margin-top:0">Signed in as</p>
         <h3 id="signed-email" style="font-family:var(--serif);font-weight:500;font-size:26px;margin:4px 0 2px"></h3>
         <p id="signed-role" style="color:var(--gold);letter-spacing:.12em;text-transform:uppercase;font-size:10px;margin:0 0 18px"></p>
@@ -93,10 +126,7 @@
   <div class="drawer-backdrop hidden" id="drawer-backdrop"></div>
   <aside class="cart-drawer" id="cart-drawer" aria-label="Shopping bag" aria-hidden="true">
     <div class="drawer-header">
-      <div>
-        <p class="eyebrow">Your selection</p>
-        <h2>Shopping bag</h2>
-      </div>
+      <div><p class="eyebrow">Your selection</p><h2>Shopping bag</h2></div>
       <button class="icon-button" id="cart-close" aria-label="Close shopping bag">×</button>
     </div>
     <div class="cart-items" id="cart-items"></div>
@@ -111,12 +141,12 @@
     <button class="modal-close" data-close="account-modal" aria-label="Close">×</button>
     <p class="eyebrow">Welcome to NOIR</p>
     <h2>Your account</h2>
-    <p class="modal-description">This is a frontend demo. Choose a preview role to explore the experience.</p>
+    <p class="modal-description">This is a frontend demo. Choose a preview role.</p>
     <div class="role-actions">
       <button class="button button-gold button-full" id="customer-login">Continue as customer</button>
       <button class="button button-outline button-full" id="admin-login">Preview admin dashboard</button>
     </div>
-    <p class="small-note">Demo only — no real credentials are collected.</p>
+    <p class="small-note">Demo only — no real credentials.</p>
   </dialog>
 
   <dialog class="modal product-modal" id="product-modal">
@@ -128,7 +158,7 @@
     <button class="modal-close" data-close="checkout-modal" aria-label="Close">×</button>
     <p class="eyebrow">Almost yours</p>
     <h2>Checkout preview</h2>
-    <p class="modal-description">This demo does not process payments. Enter your details to preview an order confirmation.</p>
+    <p class="modal-description">This demo does not process payments.</p>
     <form id="checkout-form" class="checkout-form">
       <label>Full name<input name="name" required placeholder="Your name"></label>
       <label>Email address<input name="email" type="email" required placeholder="you@example.com"></label>
@@ -141,30 +171,77 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      const s = typeof noirGetSession === "function" ? noirGetSession() : null;
-      const nameEl = document.getElementById("account-name");
-      const copyEl = document.getElementById("account-copy");
-      const actions = document.getElementById("account-actions");
-      const signed = document.getElementById("account-signed");
-      const emailEl = document.getElementById("signed-email");
-      const roleEl = document.getElementById("signed-role");
-      const adminLink = document.getElementById("signed-admin-link");
+    /* Populate account view — runs after auth.js loaded */
+    (function () {
+      function render() {
+        const s = (typeof noirGetSession === 'function') ? noirGetSession() : null;
+        const nameEl = document.getElementById('account-name');
+        const copyEl = document.getElementById('account-copy');
+        const actions = document.getElementById('account-actions');
+        const signed = document.getElementById('account-signed');
+        const emailEl = document.getElementById('signed-email');
+        const roleEl = document.getElementById('signed-role');
+        const adminLink = document.getElementById('signed-admin-link');
 
-      if (s) {
-        if (nameEl) nameEl.textContent = (s.name || "friend") + ".";
-        if (copyEl) copyEl.textContent = "You are signed in. Manage your session below.";
-        if (actions) actions.style.display = "none";
-        if (signed) signed.style.display = "block";
+        if (!s) {
+          if (nameEl) nameEl.textContent = 'guest.';
+          if (copyEl) copyEl.textContent = 'Sign in to continue as a customer, or open the admin studio.';
+          if (actions) actions.style.display = 'flex';
+          if (signed) signed.style.display = 'none';
+          return;
+        }
+
+        if (nameEl) nameEl.textContent = (s.name || 'friend') + '.';
+        if (copyEl) copyEl.textContent = 'You are signed in. Manage your session below.';
+        if (actions) actions.style.display = 'none';
+        if (signed) signed.style.display = 'block';
         if (emailEl) emailEl.textContent = s.email;
-        if (roleEl) roleEl.textContent = s.role === "admin" ? "Administrator" : "Customer";
-        if (adminLink) adminLink.style.display = s.role === "admin" ? "inline-flex" : "none";
+        if (roleEl) roleEl.textContent = s.role === 'admin' ? 'Administrator' : 'Customer';
+        if (adminLink) adminLink.style.display = s.role === 'admin' ? 'inline-flex' : 'none';
+
+        const btn = document.getElementById('signout-btn');
+        if (btn && !btn._bound) {
+          btn._bound = true;
+          btn.addEventListener('click', () => {
+            if (typeof noirLogout === 'function') noirLogout('login.html');
+            else { localStorage.removeItem('NOIR_SESSION'); location.href = 'login.html'; }
+          });
+        }
       }
 
-      document.getElementById("signout-btn")?.addEventListener("click", () => {
-        noirLogout("login.html");
-      });
-    });
+      // Try to sync with Supabase session (if logged in via Auth)
+      if (window.db && window.db.auth && typeof noirHasAuth === 'function' && noirHasAuth()) {
+        window.db.auth.getSession().then(({ data }) => {
+          if (data && data.session) {
+            const s = (typeof noirGetSession === 'function') ? noirGetSession() : null;
+            if (!s) {
+              // Sync from Supabase → localStorage session
+              const email = data.session.user.email;
+              const role = email === 'admin@gmail.com' ? 'admin' : 'customer';
+              if (typeof noirSetSession === 'function') {
+                noirSetSession({
+                  email,
+                  role,
+                  name: data.session.user.user_metadata?.name || email.split('@')[0],
+                  at: Date.now(),
+                  source: 'supabase',
+                  userId: data.session.user.id,
+                });
+              }
+            }
+            render();
+          } else {
+            render();
+          }
+        }).catch(render);
+      } else {
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', render);
+        } else {
+          render();
+        }
+      }
+    })();
   </script>
 </body>
 </html>

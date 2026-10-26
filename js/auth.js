@@ -1,9 +1,9 @@
 /* ============================================================
    NOIR — Authentication
    Hybrid: Supabase Auth (real) + localStorage demo (fallback)
-   Default demo credentials:
+   Demo credentials:
      Admin    → admin@gmail.com / admin
-     Customer → any email + any password (≥1 char)
+     Customer → any email + any password (≥6 chars for Supabase)
    ============================================================ */
 
 const NOIR_SESSION_KEY = 'NOIR_SESSION';
@@ -15,9 +15,7 @@ const NOIR_DEMO_ADMIN = {
   name: 'Store Admin',
 };
 
-/* ============================================================
-   DETECT SUPABASE
-   ============================================================ */
+/* ---------- SUPABASE AUTH DETECTION ---------- */
 function noirHasAuth() {
   return typeof window.db !== 'undefined'
     && window.db
@@ -25,9 +23,7 @@ function noirHasAuth() {
     && typeof window.db.auth.signInWithPassword === 'function';
 }
 
-/* ============================================================
-   SESSION (localStorage cache — always used for UI)
-   ============================================================ */
+/* ---------- SESSION (localStorage cache) ---------- */
 function noirGetSession() {
   try {
     const raw = localStorage.getItem(NOIR_SESSION_KEY);
@@ -38,9 +34,7 @@ function noirGetSession() {
 }
 
 function noirSetSession(session) {
-  try {
-    localStorage.setItem(NOIR_SESSION_KEY, JSON.stringify(session));
-  } catch (e) {}
+  try { localStorage.setItem(NOIR_SESSION_KEY, JSON.stringify(session)); } catch (e) {}
   if (typeof noirUpdateHeaderUI === 'function') noirUpdateHeaderUI();
 }
 
@@ -49,10 +43,7 @@ function noirClearSession() {
   if (typeof noirUpdateHeaderUI === 'function') noirUpdateHeaderUI();
 }
 
-/* ============================================================
-   LOGIN (async — supports both modes)
-   Returns: Promise<{ ok, session?, error?, redirect? }>
-   ============================================================ */
+/* ---------- LOGIN (async) ---------- */
 async function noirLogin(email, password) {
   const e = String(email || '').trim().toLowerCase();
   const p = String(password || '');
@@ -61,34 +52,28 @@ async function noirLogin(email, password) {
     return { ok: false, error: 'Enter both email and password.' };
   }
 
-  // -------- Mode 1: Supabase Auth (real) --------
+  // ---------- Supabase Auth (real) ----------
   if (noirHasAuth()) {
     try {
-      // Try sign in
-      let { data, error } = await window.db.auth.signInWithPassword({
-        email: e,
-        password: p,
-      });
+      let { data, error } = await window.db.auth.signInWithPassword({ email: e, password: p });
 
-      // If user doesn't exist → auto-sign-up (demo convenience)
+      // If invalid credentials → try sign up (demo convenience)
       if (error && /invalid login credentials/i.test(error.message)) {
         const signUp = await window.db.auth.signUp({ email: e, password: p });
         if (signUp.error) {
           return { ok: false, error: signUp.error.message };
         }
         data = signUp.data;
-        // If email confirmation is required, Supabase won't return a session
         if (!data.session) {
           return {
             ok: false,
-            error: 'Check your email to confirm the account, then sign in.',
+            error: 'Account created but email confirmation is required. Check your inbox, or disable "Confirm email" in Supabase Auth settings.',
           };
         }
       } else if (error) {
         return { ok: false, error: error.message };
       }
 
-      // Determine role — admin email gets admin
       const role = (e === NOIR_DEMO_ADMIN.email) ? 'admin' : 'customer';
       const name = role === 'admin'
         ? NOIR_DEMO_ADMIN.name
@@ -104,18 +89,33 @@ async function noirLogin(email, password) {
       };
       noirSetSession(session);
 
+      // Verify role matches requirement if redirected from admin
+      const params = new URLSearchParams(location.search);
+      const forcedRole = params.get('role');
+      const next = params.get('next');
+
+      if (forcedRole === 'admin' && role !== 'admin') {
+        // Signed in but not admin → sign out and reject
+        try { await window.db.auth.signOut(); } catch (_) {}
+        noirClearSession();
+        return {
+          ok: false,
+          error: 'Admin access requires the admin account (admin@gmail.com).',
+        };
+      }
+
       return {
         ok: true,
         session,
-        redirect: role === 'admin' ? 'admin.html' : 'account.html',
+        redirect: next || (role === 'admin' ? 'admin.html' : 'account.html'),
       };
     } catch (err) {
       console.error('[auth] Supabase login error:', err);
-      return { ok: false, error: 'Login failed. Please try again.' };
+      return { ok: false, error: 'Login failed: ' + (err.message || 'Unknown error') };
     }
   }
 
-  // -------- Mode 2: Demo localStorage (fallback) --------
+  // ---------- Demo fallback (no Supabase) ----------
   if (e === NOIR_DEMO_ADMIN.email && p === NOIR_DEMO_ADMIN.password) {
     const session = { email: e, role: 'admin', name: NOIR_DEMO_ADMIN.name, at: Date.now(), source: 'demo' };
     noirSetSession(session);
@@ -133,13 +133,10 @@ async function noirLogin(email, password) {
   return { ok: true, session, redirect: 'account.html' };
 }
 
-/* ============================================================
-   LOGOUT
-   ============================================================ */
+/* ---------- LOGOUT ---------- */
 async function noirLogout(redirect) {
   if (redirect === undefined) redirect = 'index.html';
 
-  // Sign out from Supabase too (best-effort)
   if (noirHasAuth()) {
     try { await window.db.auth.signOut(); } catch (e) {}
   }
@@ -151,9 +148,7 @@ async function noirLogout(redirect) {
   }
 }
 
-/* ============================================================
-   GUARD
-   ============================================================ */
+/* ---------- GUARD ---------- */
 function noirRequireRole(role) {
   const s = noirGetSession();
   if (!s || (role && s.role !== role)) {
@@ -164,9 +159,7 @@ function noirRequireRole(role) {
   return s;
 }
 
-/* ============================================================
-   HEADER UI (account button state)
-   ============================================================ */
+/* ---------- HEADER UI ---------- */
 function noirUpdateHeaderUI() {
   const btn = document.getElementById('account-button');
   if (!btn) return;
@@ -184,9 +177,7 @@ function noirUpdateHeaderUI() {
   }
 }
 
-/* ============================================================
-   LOGIN PAGE FORM HANDLER
-   ============================================================ */
+/* ---------- LOGIN PAGE HANDLER ---------- */
 document.addEventListener('DOMContentLoaded', function () {
   noirUpdateHeaderUI();
 
@@ -222,18 +213,12 @@ document.addEventListener('DOMContentLoaded', function () {
     e.preventDefault();
     const data = new FormData(form);
     const submitBtn = form.querySelector('button[type="submit"]');
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Signing in…';
-    }
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Signing in…'; }
     if (errorEl) errorEl.style.display = 'none';
 
     const result = await noirLogin(data.get('email'), data.get('password'));
 
-    if (submitBtn) {
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Sign in';
-    }
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Sign in'; }
 
     if (!result.ok) {
       if (errorEl) {
@@ -251,9 +236,7 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 });
 
-/* ============================================================
-   EXPORTS
-   ============================================================ */
+/* ---------- EXPORTS ---------- */
 window.noirGetSession = noirGetSession;
 window.noirSetSession = noirSetSession;
 window.noirClearSession = noirClearSession;
@@ -261,3 +244,4 @@ window.noirLogin = noirLogin;
 window.noirLogout = noirLogout;
 window.noirRequireRole = noirRequireRole;
 window.noirUpdateHeaderUI = noirUpdateHeaderUI;
+window.noirHasAuth = noirHasAuth;
