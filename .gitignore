@@ -1,0 +1,18 @@
+# Secrets — never commit
+js/config.js
+.env
+.env.local
+
+# Dependencies
+node_modules/
+
+# System
+.DS_Store
+Thumbs.db
+
+# Build output
+dist/
+build/
+
+# VS Code
+.vscode/
