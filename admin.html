@@ -6,7 +6,6 @@
   <meta name="description" content="NOIR admin studio — demo dashboard.">
   <title>Admin — NOIR Arabian Luxury</title>
 
-  <!-- Anti-flash: theme + language + radius -->
   <script>
     (function () {
       try {
@@ -25,10 +24,7 @@
         if (raw2) {
           var d = JSON.parse(raw2);
           if (d.settings && d.settings.radius != null) r.style.setProperty('--radius', d.settings.radius + 'px');
-          if (d.settings && d.settings.language) {
-            r.lang = d.settings.language;
-            r.dir = d.settings.language === 'ar' ? 'rtl' : 'ltr';
-          }
+          if (d.settings && d.settings.language) { r.lang = d.settings.language; r.dir = d.settings.language === 'ar' ? 'rtl' : 'ltr'; }
         }
       } catch (e) {}
     })();
@@ -39,24 +35,13 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&family=Inter:wght@400;500;600&family=Libre+Baskerville:wght@400;700&family=Manrope:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
 
-  <!-- Supabase SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-  <!-- Config (secrets) → must load BEFORE supabase-client -->
   <script src="js/config.js"></script>
-
-  <!-- Client init (reads config) -->
   <script src="js/supabase-client.js" defer></script>
-
-  <!-- Data layer -->
   <script src="js/store.js" defer></script>
-
-  <!-- i18n + theme + auth -->
   <script src="js/i18n.js" defer></script>
   <script src="js/theme.js" defer></script>
   <script src="js/auth.js" defer></script>
-
-  <!-- UI + admin -->
   <script src="js/app.js" defer></script>
   <script src="js/products.js" defer></script>
   <script src="js/admin.js" defer></script>
