@@ -6,31 +6,22 @@
   <meta name="description" content="NOIR admin studio — management dashboard.">
   <title>Admin — NOIR Arabian Luxury</title>
 
-  <!-- Anti-flash: fast first paint from localStorage hints.
-       Real values are re-applied from Supabase by store.js + theme.js. -->
+  <!-- Anti-flash theme + lang -->
   <script>
     (function () {
       try {
         var r = document.documentElement;
+        var p = JSON.parse(localStorage.getItem('noir-theme-prefs') || '{}');
+        if (p.bg) r.style.setProperty('--bg', p.bg);
+        if (p.text) r.style.setProperty('--text', p.text);
+        if (p.accent) r.style.setProperty('--accent', p.accent);
+        if (p.serif) r.style.setProperty('--font-serif', '"' + p.serif + '"');
+        if (p.sans) r.style.setProperty('--font-sans', '"' + p.sans + '"');
+        if (p.preset) r.setAttribute('data-theme', p.preset);
 
-        var raw = localStorage.getItem('noir-theme-prefs');
-        if (raw) {
-          var p = JSON.parse(raw);
-          if (p.bg) r.style.setProperty('--bg', p.bg);
-          if (p.text) r.style.setProperty('--text', p.text);
-          if (p.accent) r.style.setProperty('--accent', p.accent);
-          if (p.serif) r.style.setProperty('--font-serif', '"' + p.serif + '"');
-          if (p.sans) r.style.setProperty('--font-sans', '"' + p.sans + '"');
-          if (p.preset) r.setAttribute('data-theme', p.preset);
-        }
-
-        // Optional cached copy (store.js may keep this in sync for fast paint)
-        var s = localStorage.getItem('noir-app-settings');
-        if (s) {
-          var d = JSON.parse(s);
-          if (d.radius != null) r.style.setProperty('--radius', d.radius + 'px');
-          if (d.language) { r.lang = d.language; r.dir = d.language === 'ar' ? 'rtl' : 'ltr'; }
-        }
+        var d = JSON.parse(localStorage.getItem('noir-app-settings') || '{}');
+        if (d.radius != null) r.style.setProperty('--radius', d.radius + 'px');
+        if (d.language) { r.lang = d.language; r.dir = d.language === 'ar' ? 'rtl' : 'ltr'; }
       } catch (e) {}
     })();
   </script>
@@ -42,14 +33,10 @@
 
   <!-- Supabase SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-  <!-- Config (secrets) — must load before supabase-client -->
   <script src="js/config.js"></script>
-
-  <!-- Supabase client init -->
   <script src="js/supabase-client.js" defer></script>
 
-  <!-- Data layer -->
+  <!-- Data -->
   <script src="js/store.js" defer></script>
   <script src="js/branding.js" defer></script>
 
@@ -58,7 +45,7 @@
   <script src="js/theme.js" defer></script>
   <script src="js/auth.js" defer></script>
 
-  <!-- UI + admin (admin.js contains bootAdmin — session check + redirect) -->
+  <!-- UI + admin (admin.js contains bootAdmin) -->
   <script src="js/app.js" defer></script>
   <script src="js/admin.js" defer></script>
 </head>

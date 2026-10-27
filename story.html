@@ -6,138 +6,64 @@
   <meta name="description" content="The story and philosophy of NOIR Arabian Perfumes.">
   <title>Our story — NOIR Arabian Luxury</title>
 
-  <!-- Anti-flash: apply saved theme before CSS paints -->
   <script>
     (function () {
-      var t = localStorage.getItem('noir-theme');
-      if (t) document.documentElement.setAttribute('data-theme', t);
+      try {
+        var p = JSON.parse(localStorage.getItem('noir-theme-prefs') || '{}');
+        var r = document.documentElement;
+        if (p.bg) r.style.setProperty('--bg', p.bg);
+        if (p.text) r.style.setProperty('--text', p.text);
+        if (p.accent) r.style.setProperty('--accent', p.accent);
+        if (p.serif) r.style.setProperty('--font-serif', '"' + p.serif + '"');
+        if (p.sans) r.style.setProperty('--font-sans', '"' + p.sans + '"');
+        if (p.preset) r.setAttribute('data-theme', p.preset);
+        var d = JSON.parse(localStorage.getItem('noir-app-settings') || '{}');
+        if (d.radius != null) r.style.setProperty('--radius', d.radius + 'px');
+        if (d.language) { r.lang = d.language; r.dir = d.language === 'ar' ? 'rtl' : 'ltr'; }
+      } catch (e) {}
     })();
   </script>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&family=Inter:wght@400;500;600&family=Libre+Baskerville:wght@400;700&family=Manrope:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js" defer></script>
+  <script src="js/store.js" defer></script>
+  <script src="js/branding.js" defer></script>
+  <script src="js/i18n.js" defer></script>
+  <script src="js/theme.js" defer></script>
   <script src="js/auth.js" defer></script>
   <script src="js/app.js" defer></script>
   <script src="js/cart.js" defer></script>
-  <script src="js/page-init.js" defer></script>
-  <script src="js/branding.js" defer></script>
+  <script type="module" src="js/components/index.js"></script>
 </head>
 <body>
-  <div class="announcement">
-    <span>Complimentary delivery on orders over $99</span>
-    <span class="announcement-ar" lang="ar">توصيل مجاني للطلبات فوق ٩٩ دولار</span>
-  </div>
+  <noir-layout>
+    <main>
+      <section class="story-section section-wrap" id="story">
+        <p class="eyebrow centered">Our philosophy</p>
+        <h2>A fragrance is more than a scent.<br><em>It is a memory.</em></h2>
+        <p>Rooted in the warmth of Arabian hospitality and the richness of oud, NOIR creates fragrances designed to become part of your story.</p>
+        <a href="shop.html" class="text-link">Discover NOIR <span>→</span></a>
+      </section>
 
-  <header class="site-header">
-    <a class="brand" href="index.html" aria-label="NOIR home"><span>NOIR</span><small>ARABIAN PERFUMES</small></a>
-    <button class="icon-button menu-toggle" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
-    <nav class="main-nav" id="main-nav" aria-label="Main navigation">
-      <a href="index.html">Home</a>
-      <a href="shop.html">Shop</a>
-      <a href="collections.html">Collections</a>
-      <a href="story.html">Our story</a>
-    </nav>
-    <div class="header-actions">
-      <button class="icon-button" id="search-toggle" aria-label="Search products">⌕</button>
-      <button class="icon-button" id="account-button" aria-label="Open account">♙</button>
-      <button class="icon-button cart-trigger" id="cart-open" aria-label="Open shopping bag">♧ <span class="cart-count" id="cart-count">0</span></button>
-    </div>
-  </header>
-
-  <main>
-    <section class="story-section section-wrap" id="story">
-      <p class="eyebrow centered">Our philosophy</p>
-      <h2>A fragrance is more than a scent.<br><em>It is a memory.</em></h2>
-      <p>Rooted in the warmth of Arabian hospitality and the richness of oud, NOIR creates fragrances designed to become part of your story.</p>
-      <a href="shop.html" class="text-link">Discover NOIR <span>→</span></a>
-    </section>
-
-    <section class="newsletter">
-      <div>
-        <p class="eyebrow">A note from NOIR</p>
-        <h2>Enter our world of <em>fragrance.</em></h2>
-        <p>New arrivals, rituals and stories — delivered thoughtfully.</p>
-      </div>
-      <form id="newsletter-form" class="newsletter-form">
-        <label class="sr-only" for="newsletter-email">Email address</label>
-        <input id="newsletter-email" type="email" placeholder="Your email address" required>
-        <button type="submit" aria-label="Subscribe">→</button>
-      </form>
-    </section>
-  </main>
-
-  <footer class="site-footer">
-    <a class="brand" href="index.html"><span>NOIR</span><small>ARABIAN PERFUMES</small></a>
-    <div>
-      <h3>Explore</h3>
-      <a href="shop.html">All fragrances</a>
-      <a href="collections.html">Collections</a>
-      <a href="story.html">Our story</a>
-    </div>
-    <div>
-      <h3>Customer care</h3>
-      <a href="#footer">Shipping & delivery</a>
-      <a href="#footer">Returns & exchanges</a>
-      <a href="#footer">Contact us</a>
-    </div>
-    <div>
-      <h3>Follow our story</h3>
-      <p>Instagram &nbsp; Pinterest &nbsp; TikTok</p>
-      <button class="text-link admin-link" id="admin-open">Admin preview ↗</button>
-    </div>
-    <p class="copyright">© 2026 NOIR Arabian Perfumes. Demo storefront for learning purposes.</p>
-  </footer>
-
-  <div class="drawer-backdrop hidden" id="drawer-backdrop"></div>
-  <aside class="cart-drawer" id="cart-drawer" aria-label="Shopping bag" aria-hidden="true">
-    <div class="drawer-header">
-      <div>
-        <p class="eyebrow">Your selection</p>
-        <h2>Shopping bag</h2>
-      </div>
-      <button class="icon-button" id="cart-close" aria-label="Close shopping bag">×</button>
-    </div>
-    <div class="cart-items" id="cart-items"></div>
-    <div class="cart-footer">
-      <div class="subtotal"><span>Subtotal</span><strong id="cart-subtotal">$0.00</strong></div>
-      <p class="small-note">Shipping and taxes calculated at checkout.</p>
-      <button class="button button-gold button-full" id="checkout-button">Continue to checkout →</button>
-    </div>
-  </aside>
-
-  <dialog class="modal" id="account-modal">
-    <button class="modal-close" data-close="account-modal" aria-label="Close">×</button>
-    <p class="eyebrow">Welcome to NOIR</p>
-    <h2>Your account</h2>
-    <p class="modal-description">This is a frontend demo. Choose a preview role to explore the experience.</p>
-    <div class="role-actions">
-      <button class="button button-gold button-full" id="customer-login">Continue as customer</button>
-      <button class="button button-outline button-full" id="admin-login">Preview admin dashboard</button>
-    </div>
-    <p class="small-note">Demo only — no real credentials are collected.</p>
-  </dialog>
-
-  <dialog class="modal product-modal" id="product-modal">
-    <button class="modal-close" data-close="product-modal" aria-label="Close">×</button>
-    <div id="product-detail"></div>
-  </dialog>
-
-  <dialog class="modal checkout-modal" id="checkout-modal">
-    <button class="modal-close" data-close="checkout-modal" aria-label="Close">×</button>
-    <p class="eyebrow">Almost yours</p>
-    <h2>Checkout preview</h2>
-    <p class="modal-description">This demo does not process payments. Enter your details to preview an order confirmation.</p>
-    <form id="checkout-form" class="checkout-form">
-      <label>Full name<input name="name" required placeholder="Your name"></label>
-      <label>Email address<input name="email" type="email" required placeholder="you@example.com"></label>
-      <label>Delivery address<textarea name="address" required rows="3" placeholder="Street, city, country"></textarea></label>
-      <div class="subtotal"><span>Total</span><strong id="checkout-total">$0.00</strong></div>
-      <button class="button button-gold button-full" type="submit">Place demo order</button>
-    </form>
-  </dialog>
-
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      <section class="newsletter">
+        <div>
+          <p class="eyebrow">A note from NOIR</p>
+          <h2>Enter our world of <em>fragrance.</em></h2>
+          <p>New arrivals, rituals and stories — delivered thoughtfully.</p>
+        </div>
+        <form id="newsletter-form" class="newsletter-form">
+          <label class="sr-only" for="newsletter-email">Email address</label>
+          <input id="newsletter-email" type="email" placeholder="Your email address" required>
+          <button type="submit" aria-label="Subscribe">→</button>
+        </form>
+      </section>
+    </main>
+  </noir-layout>
 </body>
 </html>

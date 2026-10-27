@@ -6,27 +6,20 @@
   <meta name="description" content="Sign in or create an account — NOIR Arabian Luxury.">
   <title>Sign in — NOIR Arabian Luxury</title>
 
-  <!-- Anti-flash theme -->
   <script>
     (function () {
       try {
-        var raw = localStorage.getItem('noir-theme-prefs');
-        if (raw) {
-          var p = JSON.parse(raw);
-          var r = document.documentElement;
-          if (p.bg) r.style.setProperty('--bg', p.bg);
-          if (p.text) r.style.setProperty('--text', p.text);
-          if (p.accent) r.style.setProperty('--accent', p.accent);
-          if (p.serif) r.style.setProperty('--font-serif', '"' + p.serif + '"');
-          if (p.sans) r.style.setProperty('--font-sans', '"' + p.sans + '"');
-          if (p.preset) r.setAttribute('data-theme', p.preset);
-        }
-        var s = localStorage.getItem('noir-app-settings');
-        if (s) {
-          var d = JSON.parse(s);
-          if (d.radius != null) r.style.setProperty('--radius', d.radius + 'px');
-          if (d.language) { r.lang = d.language; r.dir = d.language === 'ar' ? 'rtl' : 'ltr'; }
-        }
+        var p = JSON.parse(localStorage.getItem('noir-theme-prefs') || '{}');
+        var r = document.documentElement;
+        if (p.bg) r.style.setProperty('--bg', p.bg);
+        if (p.text) r.style.setProperty('--text', p.text);
+        if (p.accent) r.style.setProperty('--accent', p.accent);
+        if (p.serif) r.style.setProperty('--font-serif', '"' + p.serif + '"');
+        if (p.sans) r.style.setProperty('--font-sans', '"' + p.sans + '"');
+        if (p.preset) r.setAttribute('data-theme', p.preset);
+        var d = JSON.parse(localStorage.getItem('noir-app-settings') || '{}');
+        if (d.radius != null) r.style.setProperty('--radius', d.radius + 'px');
+        if (d.language) { r.lang = d.language; r.dir = d.language === 'ar' ? 'rtl' : 'ltr'; }
       } catch (e) {}
     })();
   </script>
@@ -40,177 +33,67 @@
   <script src="js/config.js"></script>
   <script src="js/supabase-client.js" defer></script>
   <script src="js/store.js" defer></script>
+  <script src="js/branding.js" defer></script>
   <script src="js/i18n.js" defer></script>
   <script src="js/theme.js" defer></script>
   <script src="js/auth.js" defer></script>
   <script src="js/app.js" defer></script>
   <script src="js/cart.js" defer></script>
-  <script src="js/branding.js" defer></script>
+  <script type="module" src="js/components/index.js"></script>
 
-  <!-- Styles بسيطة للـ Tabs (اختياري — تقدر تحطها في styles.css) -->
   <style>
-    .auth-tabs {
-      display: flex;
-      gap: 0;
-      max-width: 420px;
-      margin: 22px auto 0;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      overflow: hidden;
-    }
-    .auth-tab {
-      flex: 1;
-      padding: 12px 16px;
-      background: transparent;
-      border: none;
-      cursor: pointer;
-      font-family: var(--font-sans);
-      font-size: 12px;
-      letter-spacing: .12em;
-      text-transform: uppercase;
-      color: var(--muted);
-      transition: background .2s, color .2s;
-    }
-    .auth-tab.active {
-      background: var(--gold-light, #c89b55);
-      color: #1a1a1a;
-      font-weight: 600;
-    }
+    .auth-tabs { display: flex; max-width: 420px; margin: 22px auto 0;
+      border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+    .auth-tab { flex: 1; padding: 12px 16px; background: transparent; border: none;
+      cursor: pointer; font-family: var(--font-sans); font-size: 12px;
+      letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+    .auth-tab.active { background: var(--gold-light, #c89b55); color: #1a1a1a; font-weight: 600; }
     .auth-panel.hidden { display: none; }
   </style>
 </head>
 <body>
-  <div class="announcement">
-    <span>Complimentary delivery on orders over $99</span>
-    <span class="announcement-ar" lang="ar">توصيل مجاني للطلبات فوق ٩٩ دولار</span>
-  </div>
+  <noir-layout>
+    <main>
+      <section class="story-section section-wrap">
+        <p class="eyebrow centered">Welcome to NOIR</p>
+        <h2>Sign <em>in.</em></h2>
+        <p id="login-hint">Sign in with your NOIR account, or create a new one to start shopping.</p>
 
-  <header class="site-header">
-    <a class="brand" href="index.html" aria-label="NOIR home"><span>NOIR</span><small>ARABIAN PERFUMES</small></a>
-    <button class="icon-button menu-toggle" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
-    <nav class="main-nav" id="main-nav" aria-label="Main navigation">
-      <a href="index.html" data-i18n="nav.home">Home</a>
-      <a href="shop.html" data-i18n="nav.shop">Shop</a>
-      <a href="collections.html" data-i18n="nav.collections">Collections</a>
-      <a href="story.html" data-i18n="nav.story">Our story</a>
-    </nav>
-    <div class="header-actions">
-      <button class="icon-button" id="search-toggle" aria-label="Search products">⌕</button>
-      <button class="icon-button" id="account-button" aria-label="Open account">♙</button>
-      <button class="icon-button cart-trigger" id="cart-open" aria-label="Open shopping bag">♧ <span class="cart-count" id="cart-count">0</span></button>
-    </div>
-  </header>
+        <div class="auth-tabs" role="tablist" aria-label="Authentication mode">
+          <button class="auth-tab active" id="tab-signin" role="tab" aria-selected="true" data-mode="signin">Sign in</button>
+          <button class="auth-tab" id="tab-signup" role="tab" aria-selected="false" data-mode="signup">Create account</button>
+        </div>
 
-  <main>
-    <section class="story-section section-wrap">
-      <p class="eyebrow centered">Welcome to NOIR</p>
-      <h2>Sign <em>in.</em></h2>
-      <p id="login-hint">Sign in with your NOIR account, or create a new one to start shopping.</p>
+        <form id="login-form" class="checkout-form auth-panel" style="max-width:420px;margin:22px auto 0;text-align:left">
+          <label>Email address
+            <input name="email" type="email" required placeholder="you@example.com" autocomplete="email">
+          </label>
+          <label>Password
+            <input name="password" type="password" required placeholder="••••••" autocomplete="current-password" minlength="6">
+          </label>
+          <p class="small-note" id="login-error" style="color:#e7a4a4;margin:0;display:none"></p>
+          <button class="button button-gold button-full" type="submit">Sign in</button>
+        </form>
 
-      <!-- Tabs: Sign in / Create account -->
-      <div class="auth-tabs" role="tablist" aria-label="Authentication mode">
-        <button class="auth-tab active" id="tab-signin" role="tab" aria-selected="true" data-mode="signin">Sign in</button>
-        <button class="auth-tab" id="tab-signup" role="tab" aria-selected="false" data-mode="signup">Create account</button>
-      </div>
-
-      <!-- ---------- Sign In Form ---------- -->
-      <form id="login-form" class="checkout-form auth-panel" style="max-width:420px;margin:22px auto 0;text-align:left">
-        <label>Email address
-          <input name="email" type="email" required placeholder="you@example.com" autocomplete="email">
-        </label>
-        <label>Password
-          <input name="password" type="password" required placeholder="••••••" autocomplete="current-password" minlength="6">
-        </label>
-        <p class="small-note" id="login-error" style="color:#e7a4a4;margin:0;display:none"></p>
-        <button class="button button-gold button-full" type="submit">Sign in</button>
-      </form>
-
-      <!-- ---------- Sign Up Form ---------- -->
-      <form id="signup-form" class="checkout-form auth-panel hidden" style="max-width:420px;margin:22px auto 0;text-align:left">
-        <label>Full name
-          <input name="name" type="text" required placeholder="Your name" autocomplete="name" maxlength="60">
-        </label>
-        <label>Email address
-          <input name="email" type="email" required placeholder="you@example.com" autocomplete="email">
-        </label>
-        <label>Password
-          <input name="password" type="password" required placeholder="••••••" autocomplete="new-password" minlength="6">
-        </label>
-        <label>Confirm password
-          <input name="passwordConfirm" type="password" required placeholder="••••••" autocomplete="new-password" minlength="6">
-        </label>
-        <p class="small-note" id="signup-error" style="color:#e7a4a4;margin:0;display:none"></p>
-        <p class="small-note" id="signup-info" style="color:#8fd4a8;margin:0;display:none"></p>
-        <button class="button button-gold button-full" type="submit">Create account</button>
-      </form>
-    </section>
-  </main>
-
-  <footer class="site-footer">
-    <a class="brand" href="index.html"><span>NOIR</span><small>ARABIAN PERFUMES</small></a>
-    <div>
-      <h3>Explore</h3>
-      <a href="shop.html">All fragrances</a>
-      <a href="collections.html">Collections</a>
-      <a href="story.html">Our story</a>
-    </div>
-    <div>
-      <h3>Customer care</h3>
-      <a href="#footer">Shipping & delivery</a>
-      <a href="#footer">Returns & exchanges</a>
-      <a href="#footer">Contact us</a>
-    </div>
-    <div>
-      <h3>Follow our story</h3>
-      <p>Instagram &nbsp; Pinterest &nbsp; TikTok</p>
-      <button class="text-link admin-link" id="admin-open">Admin preview ↗</button>
-    </div>
-    <p class="copyright">© 2026 NOIR Arabian Perfumes. Demo storefront for learning purposes.</p>
-  </footer>
-
-  <div class="drawer-backdrop hidden" id="drawer-backdrop"></div>
-  <aside class="cart-drawer" id="cart-drawer" aria-label="Shopping bag" aria-hidden="true">
-    <div class="drawer-header">
-      <div><p class="eyebrow">Your selection</p><h2>Shopping bag</h2></div>
-      <button class="icon-button" id="cart-close" aria-label="Close shopping bag">×</button>
-    </div>
-    <div class="cart-items" id="cart-items"></div>
-    <div class="cart-footer">
-      <div class="subtotal"><span>Subtotal</span><strong id="cart-subtotal">$0.00</strong></div>
-      <p class="small-note">Shipping and taxes calculated at checkout.</p>
-      <button class="button button-gold button-full" id="checkout-button">Continue to checkout →</button>
-    </div>
-  </aside>
-
-  <dialog class="modal" id="account-modal">
-    <button class="modal-close" data-close="account-modal" aria-label="Close">×</button>
-    <p class="eyebrow">Welcome to NOIR</p>
-    <h2>Your account</h2>
-    <p class="modal-description">Sign in or create an account to continue.</p>
-    <div class="role-actions">
-      <a class="button button-gold button-full" href="login.html">Sign in / Create account</a>
-    </div>
-  </dialog>
-
-  <dialog class="modal product-modal" id="product-modal">
-    <button class="modal-close" data-close="product-modal" aria-label="Close">×</button>
-    <div id="product-detail"></div>
-  </dialog>
-
-  <dialog class="modal checkout-modal" id="checkout-modal">
-    <button class="modal-close" data-close="checkout-modal" aria-label="Close">×</button>
-    <p class="eyebrow">Almost yours</p>
-    <h2>Checkout preview</h2>
-    <p class="modal-description">This demo does not process payments.</p>
-    <form id="checkout-form" class="checkout-form">
-      <label>Full name<input name="name" required placeholder="Your name"></label>
-      <label>Email address<input name="email" type="email" required placeholder="you@example.com"></label>
-      <label>Delivery address<textarea name="address" required rows="3" placeholder="Street, city, country"></textarea></label>
-      <div class="subtotal"><span>Total</span><strong id="checkout-total">$0.00</strong></div>
-      <button class="button button-gold button-full" type="submit">Place demo order</button>
-    </form>
-  </dialog>
-
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+        <form id="signup-form" class="checkout-form auth-panel hidden" style="max-width:420px;margin:22px auto 0;text-align:left">
+          <label>Full name
+            <input name="name" type="text" required placeholder="Your name" autocomplete="name" maxlength="60">
+          </label>
+          <label>Email address
+            <input name="email" type="email" required placeholder="you@example.com" autocomplete="email">
+          </label>
+          <label>Password
+            <input name="password" type="password" required placeholder="••••••" autocomplete="new-password" minlength="6">
+          </label>
+          <label>Confirm password
+            <input name="passwordConfirm" type="password" required placeholder="••••••" autocomplete="new-password" minlength="6">
+          </label>
+          <p class="small-note" id="signup-error" style="color:#e7a4a4;margin:0;display:none"></p>
+          <p class="small-note" id="signup-info" style="color:#8fd4a8;margin:0;display:none"></p>
+          <button class="button button-gold button-full" type="submit">Create account</button>
+        </form>
+      </section>
+    </main>
+  </noir-layout>
 </body>
 </html>
