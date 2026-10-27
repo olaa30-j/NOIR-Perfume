@@ -5,6 +5,9 @@ html {
   color-scheme: dark only;
 }
 
+noir-layout { display: block; }
+site-header, site-footer, site-cart, site-modals { display: block; }
+
 :root,
 [data-theme="midnight"] {
   --bg: #07111c;
