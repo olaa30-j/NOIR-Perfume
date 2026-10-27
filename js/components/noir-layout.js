@@ -1,9 +1,14 @@
+import './site-header.js';
+import './site-footer.js';
+import './site-cart.js';
+import './site-modals.js';
+
 class NoirLayout extends HTMLElement {
   connectedCallback() {
     if (this._ready) return;
     this._ready = true;
 
-    const content = this.querySelector('main');
+    const main = this.querySelector('main');
 
     this.innerHTML = `
       <site-header></site-header>
@@ -14,13 +19,9 @@ class NoirLayout extends HTMLElement {
       <div class="toast" id="toast" role="status" aria-live="polite"></div>
     `;
 
-    if (content) {
-      this.querySelector('[data-layout-content]').appendChild(content);
+    if (main) {
+      this.querySelector('[data-layout-content]').appendChild(main);
     }
-
-    document.addEventListener('noir:admin-open', () => {
-      window.location.href = 'admin.html';
-    });
   }
 }
 customElements.define('noir-layout', NoirLayout);
