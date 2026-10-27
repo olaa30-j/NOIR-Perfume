@@ -6,14 +6,16 @@
   <meta name="description" content="NOIR admin studio — management dashboard.">
   <title>Admin — NOIR Arabian Luxury</title>
 
-  <!-- Anti-flash theme + language + radius -->
+  <!-- Anti-flash: fast first paint from localStorage hints.
+       Real values are re-applied from Supabase by store.js + theme.js. -->
   <script>
     (function () {
       try {
+        var r = document.documentElement;
+
         var raw = localStorage.getItem('noir-theme-prefs');
         if (raw) {
           var p = JSON.parse(raw);
-          var r = document.documentElement;
           if (p.bg) r.style.setProperty('--bg', p.bg);
           if (p.text) r.style.setProperty('--text', p.text);
           if (p.accent) r.style.setProperty('--accent', p.accent);
@@ -21,6 +23,8 @@
           if (p.sans) r.style.setProperty('--font-sans', '"' + p.sans + '"');
           if (p.preset) r.setAttribute('data-theme', p.preset);
         }
+
+        // Optional cached copy (store.js may keep this in sync for fast paint)
         var s = localStorage.getItem('noir-app-settings');
         if (s) {
           var d = JSON.parse(s);
@@ -39,14 +43,15 @@
   <!-- Supabase SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <!-- Config (secrets) — before supabase-client -->
+  <!-- Config (secrets) — must load before supabase-client -->
   <script src="js/config.js"></script>
 
-  <!-- Client init -->
+  <!-- Supabase client init -->
   <script src="js/supabase-client.js" defer></script>
 
   <!-- Data layer -->
   <script src="js/store.js" defer></script>
+  <script src="js/branding.js" defer></script>
 
   <!-- i18n + theme + auth -->
   <script src="js/i18n.js" defer></script>

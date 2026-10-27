@@ -1,5 +1,7 @@
 /* ============================================================
    THEME CUSTOMIZER — full user control + radius
+   Radius is read from Supabase (NOIR_DB.settings.radius) and
+   persisted through noirSaveAppSettings().
    ============================================================ */
 (function initThemeCustomizer() {
     const STORAGE = 'noir-theme-prefs';
@@ -80,7 +82,7 @@
     function buildUI() {
         if (document.getElementById('theme-customizer')) return;
         if (!document.getElementById('admin-app')) return;
-        
+
         const fab = document.createElement('button');
         fab.className = 'theme-fab';
         fab.setAttribute('aria-label', 'Customize theme');
@@ -184,18 +186,24 @@
             fontBox.appendChild(b);
         });
 
-        // Radius slider
+        // Radius slider (persisted to Supabase)
         const radiusInp = panel.querySelector('#tc-radius');
         const radiusVal = panel.querySelector('#tc-radius-val');
-        const initialR = Number(NOIR_DB.settings.radius ?? 6);
+        const initialR = Number((typeof NOIR_DB !== 'undefined' && NOIR_DB.settings?.radius) ?? 6);
         radiusInp.value = initialR;
         radiusVal.textContent = initialR + 'px';
-        radiusInp.addEventListener('input', () => {
+
+        radiusInp.addEventListener('input', async () => {
             const r = Number(radiusInp.value);
             radiusVal.textContent = r + 'px';
-            NOIR_DB.settings.radius = r;
-            noirStoreSave(NOIR_DB);
+            if (typeof NOIR_DB !== 'undefined') NOIR_DB.settings.radius = r;
             applyRadius(r);
+            if (typeof noirSaveAppSettings === 'function') {
+                try { await noirSaveAppSettings({ radius: r }); }
+                catch (err) {
+                    if (typeof showToast === 'function') showToast('Radius saved locally — DB error');
+                }
+            }
         });
 
         panel.querySelector('.tc-reset').addEventListener('click', () => {
@@ -235,15 +243,34 @@
         });
     }
 
-    apply();
-    applyRadius(NOIR_DB.settings.radius);
+    /* --- Apply from DB whenever settings arrive --- */
+    function applyFromDB() {
+        const s = (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) || {};
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => { buildUI(); syncUI(); });
-    } else {
-        buildUI(); syncUI();
+        if (s.theme && PRESETS[s.theme]) {
+            prefs = { ...prefs, ...PRESETS[s.theme], preset: s.theme };
+        }
+        apply();
+
+        if (typeof s.radius === 'number') applyRadius(s.radius);
     }
 
-    window.noirTheme = { apply, save, applyRadius, get prefs() { return prefs; }, PRESETS };
+    // first paint (avoid flash)
+    apply();
+    if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings.radius != null) {
+        applyRadius(NOIR_DB.settings.radius);
+    }
+
+    // listen for Supabase settings
+    window.addEventListener('noir:settings-ready', applyFromDB);
+    window.addEventListener('noir:radius-change', (e) => applyRadius(e.detail));
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => { buildUI(); syncUI(); applyFromDB(); });
+    } else {
+        buildUI(); syncUI(); applyFromDB();
+    }
+
+    window.noirTheme = { apply, save, applyRadius, get prefs() { return prefs; }, PRESETS, applyFromDB };
     window.noirApplyRadius = applyRadius;
 })();

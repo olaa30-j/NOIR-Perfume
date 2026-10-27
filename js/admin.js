@@ -10,7 +10,7 @@
 
 /* ---------- STATE ---------- */
 let activePanel = 'overview';
-let _adminSaving = false;  // ← flag لمنع re-render أثناء الحفظ
+let _adminSaving = false;
 
 /* ---------- HELPERS ---------- */
 function adminEsc(str) {
@@ -35,7 +35,8 @@ function adminPrice(p) {
 }
 function adminDB() {
   return typeof NOIR_DB !== 'undefined' && NOIR_DB ? NOIR_DB : {
-    products: [], orders: [], bundles: [], customers: [], settings: { language: 'en', radius: 6 },
+    products: [], orders: [], bundles: [], customers: [],
+    settings: { projectName: '', projectAddress: '', theme: 'midnight', language: 'en', radius: 6 },
   };
 }
 
@@ -114,13 +115,10 @@ function renderAdmin(panel) {
   else if (panel === 'offers') content.innerHTML = renderOffersAdmin();
   else content.innerHTML = renderSettingsAdmin();
 
-  // ✅ اربط الفورم مباشرة بعد العرض
   bindAdminForms();
-
   console.log('[admin] renderAdmin →', panel);
 }
 
-/* ✅ ربط الفورم مباشرة */
 function bindAdminForms() {
   const pf = document.getElementById('admin-product-form');
   if (pf && !pf._bound) {
@@ -253,13 +251,89 @@ function renderOffersAdmin() {
 /* ---------- SETTINGS ---------- */
 function renderSettingsAdmin() {
   const db = adminDB();
-  const lang = db.settings.language || 'en';
-  const radius = db.settings.radius ?? 6;
+  const s = db.settings || {};
+  const lang = s.language || 'en';
+  const radius = s.radius ?? 6;
+  const theme = s.theme || 'midnight';
   const dbReady = (typeof noirHasSupabase === 'function' && noirHasSupabase());
-  return `<div class="admin-page-heading"><div><h2>Store settings</h2><p>Appearance, language and data.</p></div></div>
-  <section class="admin-panel"><h3>Appearance</h3><div class="admin-setting-row"><label for="admin-lang-select">Language</label><select id="admin-lang-select" class="admin-search"><option value="en" ${lang === 'en' ? 'selected' : ''}>English</option><option value="ar" ${lang === 'ar' ? 'selected' : ''}>العربية</option></select></div><div class="admin-setting-row"><label for="admin-radius-input">Corner radius — <span id="radius-value">${radius}px</span></label><input id="admin-radius-input" type="range" min="0" max="24" step="1" value="${radius}"></div></section>
-  <section class="admin-panel"><h3>Database</h3><div class="settings-note"><strong style="color:var(--gold-light)">Status:</strong> ${dbReady ? '<span style="color:#8fd4a8">✅ Connected to Supabase</span>' : '<span style="color:#e7a4a4">❌ Not connected</span>'}<br><br>${dbReady ? 'All data is stored in Supabase (PostgreSQL).' : 'Supabase is not configured. Add URL and key in <code>js/config.js</code>.'}</div><button class="button button-outline" id="admin-reload-data" style="margin-top:12px">Reload from database</button></section>
-  <section class="admin-panel"><h3>About</h3><div class="settings-note"><strong style="color:var(--gold-light)">Authentication</strong><br>Roles are stored in the <code>customers</code> table. To grant admin access, run in the SQL editor:<br><code style="display:block;margin-top:8px;padding:8px;background:rgba(0,0,0,.3);border-radius:4px;font-size:11px">update public.customers set role = 'admin' where email = 'you@example.com';</code><br><strong style="color:var(--gold-light)">Production</strong><br>Add server-side validation and a payment provider before going live.</div></section>`;
+  const themes = ['midnight', 'aurora', 'emerald', 'crimson', 'ivory', 'custom'];
+
+  return `<div class="admin-page-heading"><div><h2>Store settings</h2><p>Project identity, appearance, language and data — all saved to Supabase.</p></div></div>
+
+  <section class="admin-panel">
+    <h3>Project identity</h3>
+    <div class="admin-product-form" style="grid-template-columns:1fr">
+      <label>Project name
+        <input id="settings-project-name" type="text" value="${adminEsc(s.projectName || '')}" maxlength="80" placeholder="NOIR Arabian Perfumes">
+      </label>
+      <label>Project address
+        <input id="settings-project-address" type="text" value="${adminEsc(s.projectAddress || '')}" maxlength="160" placeholder="Riyadh, Saudi Arabia">
+      </label>
+      <div class="form-actions">
+        <button type="button" class="button button-gold" id="settings-save-identity">Save identity</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="admin-panel">
+    <h3>Appearance</h3>
+    <div class="admin-setting-row"><label for="admin-lang-select">Language</label>
+      <select id="admin-lang-select" class="admin-search">
+        <option value="en" ${lang === 'en' ? 'selected' : ''}>English</option>
+        <option value="ar" ${lang === 'ar' ? 'selected' : ''}>العربية</option>
+      </select>
+    </div>
+    <div class="admin-setting-row"><label for="admin-theme-select">Default theme</label>
+      <select id="admin-theme-select" class="admin-search">
+        ${themes.map(t => `<option value="${t}" ${theme === t ? 'selected' : ''}>${t}</option>`).join('')}
+      </select>
+    </div>
+    <div class="admin-setting-row"><label for="admin-radius-input">Corner radius — <span id="radius-value">${radius}px</span></label>
+      <input id="admin-radius-input" type="range" min="0" max="24" step="1" value="${radius}">
+    </div>
+  </section>
+
+  <section class="admin-panel">
+    <h3>Database</h3>
+    <div class="settings-note">
+      <strong style="color:var(--gold-light)">Status:</strong>
+      ${dbReady ? '<span style="color:#8fd4a8">✅ Connected to Supabase</span>' : '<span style="color:#e7a4a4">❌ Not connected</span>'}
+      <br><br>
+      ${dbReady ? 'Settings are stored in <code>public.site_settings</code> (row id=1).' : 'Supabase is not configured. Add URL and key in <code>js/config.js</code>.'}
+    </div>
+    <button class="button button-outline" id="admin-reload-data" style="margin-top:12px">Reload from database</button>
+  </section>
+
+  <section class="admin-panel">
+    <h3>About</h3>
+    <div class="settings-note">
+      <strong style="color:var(--gold-light)">Authentication</strong><br>
+      Roles are stored in the <code>customers</code> table. To grant admin access, run in the SQL editor:
+      <code style="display:block;margin-top:8px;padding:8px;background:rgba(0,0,0,.3);border-radius:4px;font-size:11px">update public.customers set role = 'admin' where email = 'you@example.com';</code>
+      <br><strong style="color:var(--gold-light)">Production</strong><br>
+      Add server-side validation and a payment provider before going live.
+    </div>
+  </section>`;
+}
+
+/* ---------- SETTINGS SAVE HELPER ---------- */
+async function saveSettingsField(patch) {
+  if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
+    adminToast('❌ Supabase not configured.');
+    return;
+  }
+  try {
+    await noirSaveAppSettings(patch);
+    adminToast('✅ Settings saved');
+    if (patch.theme && window.noirTheme && window.noirTheme.applyFromDB) {
+      window.noirTheme.applyFromDB();
+    }
+    if (patch.language && typeof noirSetLang === 'function') {
+      noirSetLang(patch.language);
+    }
+  } catch (err) {
+    adminToast('❌ Save failed: ' + (err.message || 'Unknown error'));
+  }
 }
 
 /* ---------- PRODUCT FORM ---------- */
@@ -283,11 +357,11 @@ function showProductForm(product = null) {
 }
 
 /* ============================================================
-   SAVE PRODUCT — مع flag لمنع re-render أثناء الحفظ
+   SAVE PRODUCT
    ============================================================ */
 async function saveAdminProduct(form) {
   console.log('[admin] saveAdminProduct start');
-  _adminSaving = true;  // ← يمنع noir:data-ready من إعادة الرسم
+  _adminSaving = true;
 
   try {
     const data = new FormData(form);
@@ -344,8 +418,6 @@ async function saveAdminProduct(form) {
       }
 
       adminToast(current ? '✅ Product updated' : '✅ Product added');
-
-      // ✅ يفضل على tab الـ products
       activePanel = 'products';
       renderAdmin('products');
     } catch (err) {
@@ -355,7 +427,7 @@ async function saveAdminProduct(form) {
       if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save product'; }
     }
   } finally {
-    _adminSaving = false;  // ← reset دايماً
+    _adminSaving = false;
   }
 }
 
@@ -443,7 +515,6 @@ async function saveBundle(form) {
       }
 
       adminToast(current ? '✅ Bundle updated' : '✅ Bundle added');
-
       activePanel = 'bundles';
       renderAdmin('bundles');
     } catch (err) {
@@ -458,7 +529,7 @@ async function saveBundle(form) {
 }
 
 /* ============================================================
-   🔒 FORM SUBMIT — CAPTURE PHASE
+   FORM SUBMIT — CAPTURE PHASE
    ============================================================ */
 document.addEventListener('submit', function (event) {
   const target = event.target;
@@ -477,7 +548,6 @@ document.addEventListener('submit', function (event) {
     return false;
   }
 }, true);
-
 
 /* ---------- LISTENERS ---------- */
 document.addEventListener('DOMContentLoaded', function () {
@@ -505,6 +575,14 @@ document.addEventListener('DOMContentLoaded', function () {
     if (event.target.closest('#cancel-product-form')) {
       const p = document.getElementById('product-form-panel');
       if (p) p.classList.add('hidden');
+      return;
+    }
+
+    if (event.target.id === 'settings-save-identity') {
+      const name = (document.getElementById('settings-project-name')?.value || '').trim();
+      const address = (document.getElementById('settings-project-address')?.value || '').trim();
+      if (!name) { adminToast('Project name is required.'); return; }
+      await saveSettingsField({ projectName: name, projectAddress: address });
       return;
     }
 
@@ -582,11 +660,13 @@ document.addEventListener('DOMContentLoaded', function () {
       if (typeof noirRefreshStoreData === 'function') {
         adminToast('Reloading from database…');
         await noirRefreshStoreData();
+        await noirLoadAppSettings();
         renderAdmin(activePanel);
         adminToast('✅ Reloaded');
       } else if (typeof noirLoadFromSupabase === 'function') {
         adminToast('Reloading from database…');
         await noirLoadFromSupabase();
+        await noirLoadAppSettings();
         renderAdmin(activePanel);
         adminToast('✅ Reloaded');
       }
@@ -614,24 +694,31 @@ document.addEventListener('DOMContentLoaded', function () {
       document.getElementById('orders-table').innerHTML =
         ordersTable(db.orders.filter(o => `${o.id} ${o.customer} ${o.email}`.toLowerCase().includes(q)), true);
     }
+    if (event.target.id === 'admin-radius-input') {
+      const r = Number(event.target.value);
+      const v = document.getElementById('radius-value');
+      if (v) v.textContent = r + 'px';
+      if (window.noirApplyRadius) window.noirApplyRadius(r);
+    }
   });
 
   adminContent.addEventListener('change', function (event) {
     if (event.target.matches('[data-order-status]')) {
       updateOrderStatus(event.target.dataset.orderStatus, event.target.value);
+      return;
     }
     if (event.target.id === 'admin-lang-select') {
-      if (typeof noirSetLang === 'function') noirSetLang(event.target.value);
-      if (typeof noirSaveAppSettings === 'function') noirSaveAppSettings();
-      renderAdmin('settings');
+      saveSettingsField({ language: event.target.value });
+      return;
+    }
+    if (event.target.id === 'admin-theme-select') {
+      saveSettingsField({ theme: event.target.value });
+      return;
     }
     if (event.target.id === 'admin-radius-input') {
       const r = Number(event.target.value);
-      NOIR_DB.settings.radius = r;
-      if (typeof noirSaveAppSettings === 'function') noirSaveAppSettings();
-      if (window.noirApplyRadius) window.noirApplyRadius(r);
-      const v = document.getElementById('radius-value');
-      if (v) v.textContent = r + 'px';
+      saveSettingsField({ radius: r });
+      return;
     }
   });
 });
@@ -651,7 +738,6 @@ window.addEventListener('noir:data-ready', function (e) {
     }
   }
 
-  // ✅ مهم: مفيش renderAdmin هنا لو _adminSaving
   if (_adminSaving) {
     console.log('[admin] data-ready during save — skipping re-render');
     return;
@@ -676,7 +762,6 @@ window.addEventListener('noir:data-ready', function (e) {
     }
 
     console.info('[admin] session OK:', session.email, '| source:', session.source);
-    // ✅ renderAdmin(activePanel) — دايماً 'overview' في الأول
     if (typeof renderAdmin === 'function') renderAdmin(activePanel);
   };
 

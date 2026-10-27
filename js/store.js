@@ -2,6 +2,8 @@
    NOIR — Central Store (Supabase ONLY)
    All reads/writes go directly to Supabase.
    No localStorage fallback for products/orders/bundles.
+   site_settings (project name, address, theme, language, radius)
+   are also Supabase-backed — single row id = 1.
    ============================================================ */
 
 const STORE_DEBUG = true;
@@ -21,7 +23,13 @@ let NOIR_DB = {
   bundles: [],
   orders: [],
   customers: [],
-  settings: { language: 'en', radius: 6 },
+  settings: {
+    projectName: 'NOIR Arabian Perfumes',
+    projectAddress: '',
+    theme: 'midnight',
+    language: 'en',
+    radius: 6,
+  },
 };
 
 /* ---------- SUPABASE DETECTION ---------- */
@@ -51,25 +59,102 @@ function noirComputePrice(product) {
   return product.price;
 }
 
-/* ---------- APP SETTINGS ---------- */
-const NOIR_APP_SETTINGS_KEY = 'noir-app-settings';
+/* ============================================================
+   APP SETTINGS (Supabase-backed, row id = 1)
+   ============================================================ */
+const NOIR_APP_SETTINGS_KEY = 'noir-app-settings'; // legacy only
 
-function noirLoadAppSettings() {
-  try {
-    const raw = localStorage.getItem(NOIR_APP_SETTINGS_KEY);
-    if (raw) {
-      const data = JSON.parse(raw);
-      Object.assign(NOIR_DB.settings, data);
-      storeLog('App settings loaded:', NOIR_DB.settings);
-    }
-  } catch (e) { storeWarn('loadAppSettings failed:', e); }
+const NOIR_DEFAULT_SETTINGS = {
+  projectName: 'NOIR Arabian Perfumes',
+  projectAddress: 'Riyadh, Saudi Arabia',
+  theme: 'midnight',
+  language: 'en',
+  radius: 6,
+};
+
+function noirApplySettingsToState(row) {
+  if (!row) return;
+  NOIR_DB.settings = {
+    ...NOIR_DB.settings,
+    projectName: row.project_name ?? NOIR_DEFAULT_SETTINGS.projectName,
+    projectAddress: row.project_address ?? NOIR_DEFAULT_SETTINGS.projectAddress,
+    theme: row.theme ?? NOIR_DEFAULT_SETTINGS.theme,
+    language: row.language ?? NOIR_DEFAULT_SETTINGS.language,
+    radius: row.radius ?? NOIR_DEFAULT_SETTINGS.radius,
+  };
 }
 
-function noirSaveAppSettings() {
+/* (optional) migrate old localStorage settings once */
+function noirMigrateLegacySettings() {
   try {
-    localStorage.setItem(NOIR_APP_SETTINGS_KEY, JSON.stringify(NOIR_DB.settings));
-    storeLog('App settings saved:', NOIR_DB.settings);
-  } catch (e) { storeWarn('saveAppSettings failed:', e); }
+    const raw = localStorage.getItem(NOIR_APP_SETTINGS_KEY);
+    if (!raw) return null;
+    const old = JSON.parse(raw);
+    localStorage.removeItem(NOIR_APP_SETTINGS_KEY);
+    return {
+      project_name: old.projectName || NOIR_DEFAULT_SETTINGS.projectName,
+      project_address: old.projectAddress || NOIR_DEFAULT_SETTINGS.projectAddress,
+      theme: old.theme || NOIR_DEFAULT_SETTINGS.theme,
+      language: old.language || NOIR_DEFAULT_SETTINGS.language,
+      radius: Number(old.radius) || NOIR_DEFAULT_SETTINGS.radius,
+    };
+  } catch { return null; }
+}
+
+async function noirLoadAppSettings() {
+  if (!noirHasSupabase()) {
+    storeWarn('noirLoadAppSettings: Supabase not configured');
+    return false;
+  }
+  try {
+    const { data, error } = await window.db
+      .from('site_settings')
+      .select('*')
+      .eq('id', 1)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) {
+      noirApplySettingsToState(data);
+      storeLog('Settings loaded from Supabase:', NOIR_DB.settings);
+    } else {
+      storeWarn('site_settings row id=1 not found — using defaults');
+    }
+    window.dispatchEvent(new CustomEvent('noir:settings-ready', { detail: NOIR_DB.settings }));
+    return true;
+  } catch (err) {
+    storeErr('Load settings failed:', err);
+    window.dispatchEvent(new CustomEvent('noir:settings-ready', { detail: NOIR_DB.settings }));
+    return false;
+  }
+}
+
+async function noirSaveAppSettings(partial) {
+  if (!noirHasSupabase()) throw new Error('Supabase not configured');
+
+  if (partial) Object.assign(NOIR_DB.settings, partial);
+
+  const row = {
+    project_name: NOIR_DB.settings.projectName,
+    project_address: NOIR_DB.settings.projectAddress,
+    theme: NOIR_DB.settings.theme,
+    language: NOIR_DB.settings.language,
+    radius: Number(NOIR_DB.settings.radius) || 6,
+  };
+
+  const { data, error } = await window.db
+    .from('site_settings')
+    .upsert({ id: 1, ...row }, { onConflict: 'id' })
+    .select()
+    .single();
+
+  if (error) {
+    storeErr('Save settings failed:', error);
+    throw error;
+  }
+  noirApplySettingsToState(data);
+  storeLog('Settings saved to Supabase ✓', NOIR_DB.settings);
+  window.dispatchEvent(new CustomEvent('noir:settings-ready', { detail: NOIR_DB.settings }));
+  return data;
 }
 
 /* ============================================================
@@ -156,7 +241,7 @@ async function noirLoadFromSupabase() {
 }
 
 /* ============================================================
-   🔄 REFRESH WITHOUT RELOAD
+   REFRESH WITHOUT RELOAD
    ============================================================ */
 async function noirRefreshStoreData() {
   storeLog('noirRefreshStoreData() start — no page reload');
@@ -195,7 +280,6 @@ async function noirRefreshStoreData() {
 
 /* ============================================================
    WRITE: PRODUCT
-   ⚠️ INSERT بدون id (GENERATED ALWAYS) — UPDATE بـ id
    ============================================================ */
 async function noirSaveProductToDB(product) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
@@ -214,7 +298,6 @@ async function noirSaveProductToDB(product) {
   };
 
   if (product.id) {
-    // تعديل
     row.id = product.id;
     storeLog('Upserting product (update):', row.name, '| id:', row.id);
     const { data, error } = await window.db
@@ -228,7 +311,6 @@ async function noirSaveProductToDB(product) {
     storeLog('Product updated ✓', data && data[0] ? data[0].id : row.id);
     return data && data[0] ? data[0] : row;
   } else {
-    // إضافة جديدة — من غير id
     storeLog('Inserting product (new):', row.name);
     const { data, error } = await window.db
       .from('products')
@@ -257,7 +339,6 @@ async function noirDeleteProductFromDB(id) {
 
 /* ============================================================
    WRITE: BUNDLE
-   ⚠️ INSERT بدون id — UPDATE بـ id
    ============================================================ */
 async function noirSaveBundleToDB(bundle) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
@@ -364,11 +445,24 @@ window.noirSaveOrderToDB = noirSaveOrderToDB;
 window.noirUpdateOrderStatusInDB = noirUpdateOrderStatusInDB;
 window.noirLoadAppSettings = noirLoadAppSettings;
 window.noirSaveAppSettings = noirSaveAppSettings;
+window.noirDEFAULT_SETTINGS = NOIR_DEFAULT_SETTINGS;
 
 /* ---------- AUTO-LOAD ---------- */
-(function autoLoad() {
-  noirLoadAppSettings();
-  const run = () => { setTimeout(() => { noirLoadFromSupabase(); }, 0); };
+(async function autoLoad() {
+  // (optional) migrate old localStorage settings
+  const legacy = noirMigrateLegacySettings();
+  if (legacy && noirHasSupabase()) {
+    try {
+      await window.db.from('site_settings').upsert({ id: 1, ...legacy }, { onConflict: 'id' });
+      storeLog('Legacy settings migrated to Supabase ✓');
+    } catch (e) { storeWarn('Legacy migration failed:', e); }
+  }
+
+  const run = async () => {
+    await noirLoadAppSettings();   // first — theme, language, radius
+    await noirLoadFromSupabase();  // then — products, orders, bundles
+  };
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', run);
   } else {
