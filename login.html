@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Sign in to NOIR — customer or admin preview.">
+  <meta name="description" content="Sign in or create an account — NOIR Arabian Luxury.">
   <title>Sign in — NOIR Arabian Luxury</title>
 
   <!-- Anti-flash theme -->
@@ -45,6 +45,38 @@
   <script src="js/auth.js" defer></script>
   <script src="js/app.js" defer></script>
   <script src="js/cart.js" defer></script>
+
+  <!-- Styles بسيطة للـ Tabs (اختياري — تقدر تحطها في styles.css) -->
+  <style>
+    .auth-tabs {
+      display: flex;
+      gap: 0;
+      max-width: 420px;
+      margin: 22px auto 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .auth-tab {
+      flex: 1;
+      padding: 12px 16px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-family: var(--font-sans);
+      font-size: 12px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      transition: background .2s, color .2s;
+    }
+    .auth-tab.active {
+      background: var(--gold-light, #c89b55);
+      color: #1a1a1a;
+      font-weight: 600;
+    }
+    .auth-panel.hidden { display: none; }
+  </style>
 </head>
 <body>
   <div class="announcement">
@@ -72,17 +104,43 @@
     <section class="story-section section-wrap">
       <p class="eyebrow centered">Welcome to NOIR</p>
       <h2>Sign <em>in.</em></h2>
-      <p id="login-hint">Use <strong>admin@gmail.com</strong> / <strong>admin</strong> for the admin studio, or any email + password to continue as a customer.</p>
+      <p id="login-hint">Sign in with your NOIR account, or create a new one to start shopping.</p>
 
-      <form id="login-form" class="checkout-form" style="max-width:420px;margin:22px auto 0;text-align:left">
+      <!-- Tabs: Sign in / Create account -->
+      <div class="auth-tabs" role="tablist" aria-label="Authentication mode">
+        <button class="auth-tab active" id="tab-signin" role="tab" aria-selected="true" data-mode="signin">Sign in</button>
+        <button class="auth-tab" id="tab-signup" role="tab" aria-selected="false" data-mode="signup">Create account</button>
+      </div>
+
+      <!-- ---------- Sign In Form ---------- -->
+      <form id="login-form" class="checkout-form auth-panel" style="max-width:420px;margin:22px auto 0;text-align:left">
         <label>Email address
           <input name="email" type="email" required placeholder="you@example.com" autocomplete="email">
         </label>
         <label>Password
-          <input name="password" type="password" required placeholder="••••••" autocomplete="current-password" minlength="1">
+          <input name="password" type="password" required placeholder="••••••" autocomplete="current-password" minlength="6">
         </label>
         <p class="small-note" id="login-error" style="color:#e7a4a4;margin:0;display:none"></p>
         <button class="button button-gold button-full" type="submit">Sign in</button>
+      </form>
+
+      <!-- ---------- Sign Up Form ---------- -->
+      <form id="signup-form" class="checkout-form auth-panel hidden" style="max-width:420px;margin:22px auto 0;text-align:left">
+        <label>Full name
+          <input name="name" type="text" required placeholder="Your name" autocomplete="name" maxlength="60">
+        </label>
+        <label>Email address
+          <input name="email" type="email" required placeholder="you@example.com" autocomplete="email">
+        </label>
+        <label>Password
+          <input name="password" type="password" required placeholder="••••••" autocomplete="new-password" minlength="6">
+        </label>
+        <label>Confirm password
+          <input name="passwordConfirm" type="password" required placeholder="••••••" autocomplete="new-password" minlength="6">
+        </label>
+        <p class="small-note" id="signup-error" style="color:#e7a4a4;margin:0;display:none"></p>
+        <p class="small-note" id="signup-info" style="color:#8fd4a8;margin:0;display:none"></p>
+        <button class="button button-gold button-full" type="submit">Create account</button>
       </form>
     </section>
   </main>
@@ -127,12 +185,10 @@
     <button class="modal-close" data-close="account-modal" aria-label="Close">×</button>
     <p class="eyebrow">Welcome to NOIR</p>
     <h2>Your account</h2>
-    <p class="modal-description">This is a frontend demo. Choose a preview role.</p>
+    <p class="modal-description">Sign in or create an account to continue.</p>
     <div class="role-actions">
-      <button class="button button-gold button-full" id="customer-login">Continue as customer</button>
-      <button class="button button-outline button-full" id="admin-login">Preview admin dashboard</button>
+      <a class="button button-gold button-full" href="login.html">Sign in / Create account</a>
     </div>
-    <p class="small-note">Demo only — no real credentials.</p>
   </dialog>
 
   <dialog class="modal product-modal" id="product-modal">

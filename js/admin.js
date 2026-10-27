@@ -1,11 +1,16 @@
 /* ============================================================
    NOIR — admin dashboard (Supabase ONLY)
    All writes go directly to Supabase. No localStorage fallback.
-   + Session check (localStorage + Supabase Auth)
+   Session comes exclusively from Supabase Auth.
+   Roles are read from the `customers` table ONLY.
+
+   ⚠️ Form submit listeners are bound in CAPTURE PHASE.
+   ⚠️ _adminSaving flag prevents re-render during save.
    ============================================================ */
 
 /* ---------- STATE ---------- */
 let activePanel = 'overview';
+let _adminSaving = false;  // ← flag لمنع re-render أثناء الحفظ
 
 /* ---------- HELPERS ---------- */
 function adminEsc(str) {
@@ -35,40 +40,26 @@ function adminDB() {
 }
 
 /* ============================================================
-   SESSION CHECK (localStorage + Supabase Auth)
-   Returns session object or null.
+   SESSION CHECK
    ============================================================ */
 async function adminCheckSession() {
-  // 1. Try localStorage
-  let session = (typeof noirGetSession === 'function') ? noirGetSession() : null;
-  console.info('[admin] localStorage session:', session);
-
-  // 2. If missing, try Supabase Auth
-  if (!session && window.db && window.db.auth) {
-    try {
-      const { data } = await window.db.auth.getSession();
-      if (data && data.session) {
-        const user = data.session.user;
-        const email = user.email || '';
-        const role = email === 'admin@gmail.com' ? 'admin' : 'customer';
-        session = {
-          email,
-          role,
-          name: (user.user_metadata && user.user_metadata.name) || email.split('@')[0],
-          at: Date.now(),
-          source: 'supabase',
-          userId: user.id,
-        };
-        if (typeof noirSetSession === 'function') noirSetSession(session);
-        console.info('[admin] recovered session from Supabase:', session);
-      }
-    } catch (e) {
-      console.error('[admin] getSession failed:', e);
-    }
+  if (!window.db || !window.db.auth) {
+    console.warn('[admin] Supabase auth not available');
+    return null;
+  }
+  if (typeof noirGetSession !== 'function') {
+    console.warn('[admin] noirGetSession not loaded');
+    return null;
   }
 
+  const session = await noirGetSession();
+  console.info('[admin] session:', session);
+
   if (!session) return null;
-  if (session.role !== 'admin') return null;
+  if (session.role !== 'admin') {
+    console.warn('[admin] session role is not admin:', session.role);
+    return null;
+  }
   return session;
 }
 
@@ -90,7 +81,6 @@ async function adminSignOut() {
     await noirLogout('index.html');
     return;
   }
-  try { localStorage.removeItem('NOIR_SESSION'); } catch (e) {}
   if (window.db && window.db.auth) {
     try { await window.db.auth.signOut(); } catch (e) {}
   }
@@ -123,6 +113,40 @@ function renderAdmin(panel) {
   else if (panel === 'bundles') content.innerHTML = renderBundlesAdmin();
   else if (panel === 'offers') content.innerHTML = renderOffersAdmin();
   else content.innerHTML = renderSettingsAdmin();
+
+  // ✅ اربط الفورم مباشرة بعد العرض
+  bindAdminForms();
+
+  console.log('[admin] renderAdmin →', panel);
+}
+
+/* ✅ ربط الفورم مباشرة */
+function bindAdminForms() {
+  const pf = document.getElementById('admin-product-form');
+  if (pf && !pf._bound) {
+    pf._bound = true;
+    pf.addEventListener('submit', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[admin] product form submit (direct)');
+      saveAdminProduct(pf);
+      return false;
+    });
+    console.log('[admin] bound submit to admin-product-form');
+  }
+
+  const bf = document.getElementById('admin-bundle-form');
+  if (bf && !bf._bound) {
+    bf._bound = true;
+    bf.addEventListener('submit', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[admin] bundle form submit (direct)');
+      saveBundle(bf);
+      return false;
+    });
+    console.log('[admin] bound submit to admin-bundle-form');
+  }
 }
 
 /* ---------- OVERVIEW ---------- */
@@ -155,8 +179,8 @@ function renderOverview() {
 function renderProductsAdmin() {
   const db = adminDB();
   return `
-    <div class="admin-page-heading"><div><h2>Product catalogue</h2><p>Create and maintain your fragrance collection.</p></div><button class="button button-gold" id="show-product-form">+ Add product</button></div>
-    <section class="admin-panel hidden" id="product-form-panel"><h3 id="product-form-title">Add a new product</h3><form id="admin-product-form" class="admin-product-form">
+    <div class="admin-page-heading"><div><h2>Product catalogue</h2><p>Create and maintain your fragrance collection.</p></div><button class="button button-gold" id="show-product-form" type="button">+ Add product</button></div>
+    <section class="admin-panel hidden" id="product-form-panel"><h3 id="product-form-title">Add a new product</h3><form id="admin-product-form" class="admin-product-form" autocomplete="off">
       <input type="hidden" name="id">
       <label>Product name<input name="name" required maxlength="60" placeholder="e.g. Desert Oud"></label>
       <label>Category<select name="category" required><option>Oud</option><option>Amber</option><option>Musk</option><option>Floral</option></select></label>
@@ -176,7 +200,7 @@ function productsTable(list) {
   return `<div class="table-wrap"><table class="admin-table"><thead><tr><th>PRODUCT</th><th>CATEGORY</th><th>PRICE</th><th>STOCK</th><th>BEST</th><th>OFFER</th><th>ACTIONS</th></tr></thead><tbody>${list.map(p => {
     const hasOffer = !!p.offer;
     const label = hasOffer ? (p.offer.label || `${p.offer.value}${p.offer.type === 'percent' ? '%' : '$'}`) : '—';
-    return `<tr><td><strong>${adminEsc(p.name)}</strong><br><span style="color:var(--muted)">${adminEsc(p.subtitle)}</span></td><td>${adminEsc(p.category)}</td><td>${adminMoney(adminPrice(p))}${hasOffer ? ` <span style="color:var(--muted);text-decoration:line-through;font-size:9px">${adminMoney(p.price)}</span>` : ''}</td><td>${p.stock}</td><td>${p.bestSeller ? '⭐' : '—'}</td><td><span class="status-pill ${hasOffer ? 'pending' : ''}">${label}</span></td><td><button class="table-action" data-edit-product="${p.id}">Edit</button><button class="table-action danger" data-delete-product="${p.id}">Delete</button></td></tr>`;
+    return `<tr><td><strong>${adminEsc(p.name)}</strong><br><span style="color:var(--muted)">${adminEsc(p.subtitle)}</span></td><td>${adminEsc(p.category)}</td><td>${adminMoney(adminPrice(p))}${hasOffer ? ` <span style="color:var(--muted);text-decoration:line-through;font-size:9px">${adminMoney(p.price)}</span>` : ''}</td><td>${p.stock}</td><td>${p.bestSeller ? '⭐' : '—'}</td><td><span class="status-pill ${hasOffer ? 'pending' : ''}">${label}</span></td><td><button class="table-action" data-edit-product="${p.id}" type="button">Edit</button><button class="table-action danger" data-delete-product="${p.id}" type="button">Delete</button></td></tr>`;
   }).join('')}</tbody></table></div>`;
 }
 
@@ -198,15 +222,15 @@ function renderOrdersAdmin() {
 function renderCustomersAdmin() {
   const db = adminDB();
   const customers = db.customers || [];
-  return `<div class="admin-page-heading"><div><h2>Customer directory</h2><p>Sample customer records for your demo store.</p></div></div><section class="admin-panel"><h3>Customers (${customers.length})</h3>${customers.map(c => `<div class="admin-customer-card"><span class="avatar">${(c.name || '?')[0]}</span><div style="flex:1"><strong>${adminEsc(c.name)}</strong><p>${adminEsc(c.email)}</p></div><div style="text-align:right"><strong>${c.orders} orders</strong><p>${adminMoney(c.spent)} spent</p></div></div>`).join('')}<p class="small-note">Customer information is mock data and is not connected to real accounts.</p></section>`;
+  return `<div class="admin-page-heading"><div><h2>Customer directory</h2><p>Customer records.</p></div></div><section class="admin-panel"><h3>Customers (${customers.length})</h3>${customers.map(c => `<div class="admin-customer-card"><span class="avatar">${(c.name || '?')[0]}</span><div style="flex:1"><strong>${adminEsc(c.name)}</strong><p>${adminEsc(c.email)}</p></div><div style="text-align:right"><strong>${c.orders} orders</strong><p>${adminMoney(c.spent)} spent</p></div></div>`).join('')}</section>`;
 }
 
 /* ---------- BUNDLES ---------- */
 function renderBundlesAdmin() {
   const db = adminDB();
   const list = db.bundles;
-  return `<div class="admin-page-heading"><div><h2>Bundles</h2><p>Product bundles shown on the home page.</p></div><button class="button button-gold" id="show-bundle-form">+ Add bundle</button></div>
-  <section class="admin-panel hidden" id="bundle-form-panel"><h3 id="bundle-form-title">Add a new bundle</h3><form id="admin-bundle-form" class="admin-product-form">
+  return `<div class="admin-page-heading"><div><h2>Bundles</h2><p>Product bundles shown on the home page.</p></div><button class="button button-gold" id="show-bundle-form" type="button">+ Add bundle</button></div>
+  <section class="admin-panel hidden" id="bundle-form-panel"><h3 id="bundle-form-title">Add a new bundle</h3><form id="admin-bundle-form" class="admin-product-form" autocomplete="off">
     <input type="hidden" name="id">
     <label>Bundle name<input name="name" required maxlength="60"></label>
     <label>Price (USD)<input name="price" type="number" min="1" step=".01" required></label>
@@ -216,14 +240,14 @@ function renderBundlesAdmin() {
     <label class="span-two" style="display:flex;flex-direction:row;align-items:center;gap:10px"><input type="checkbox" name="active" checked style="width:auto"><span>Show on home page</span></label>
     <div class="form-actions"><button type="button" class="button button-outline" id="cancel-bundle-form">Cancel</button><button type="submit" class="button button-gold">Save bundle</button></div>
   </form></section>
-  <section class="admin-panel"><h3>All bundles (${list.length})</h3>${list.length ? `<div class="table-wrap"><table class="admin-table"><thead><tr><th>NAME</th><th>PRODUCTS</th><th>PRICE</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>${list.map(b => `<tr><td><strong>${adminEsc(b.name)}</strong></td><td>${b.productIds.length} items</td><td>${adminMoney(b.price)}</td><td><span class="status-pill ${b.active ? '' : 'cancelled'}">${b.active ? 'Active' : 'Hidden'}</span></td><td><button class="table-action" data-edit-bundle="${b.id}">Edit</button><button class="table-action danger" data-delete-bundle="${b.id}">Delete</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="admin-empty">No bundles yet.</div>'}</section>`;
+  <section class="admin-panel"><h3>All bundles (${list.length})</h3>${list.length ? `<div class="table-wrap"><table class="admin-table"><thead><tr><th>NAME</th><th>PRODUCTS</th><th>PRICE</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>${list.map(b => `<tr><td><strong>${adminEsc(b.name)}</strong></td><td>${b.productIds.length} items</td><td>${adminMoney(b.price)}</td><td><span class="status-pill ${b.active ? '' : 'cancelled'}">${b.active ? 'Active' : 'Hidden'}</span></td><td><button class="table-action" data-edit-bundle="${b.id}" type="button">Edit</button><button class="table-action danger" data-delete-bundle="${b.id}" type="button">Delete</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="admin-empty">No bundles yet.</div>'}</section>`;
 }
 
 /* ---------- OFFERS ---------- */
 function renderOffersAdmin() {
   const db = adminDB();
   const withOffers = db.products.filter(p => p.offer);
-  return `<div class="admin-page-heading"><div><h2>Offers</h2><p>Products currently on sale.</p></div></div><section class="admin-panel"><h3>Active offers (${withOffers.length})</h3>${withOffers.length ? `<div class="table-wrap"><table class="admin-table"><thead><tr><th>PRODUCT</th><th>ORIGINAL</th><th>OFFER</th><th>NEW PRICE</th><th>ACTION</th></tr></thead><tbody>${withOffers.map(p => `<tr><td><strong>${adminEsc(p.name)}</strong></td><td>${adminMoney(p.price)}</td><td><span class="status-pill pending">${p.offer.label || p.offer.value}</span></td><td style="color:var(--gold-light);font-weight:600">${adminMoney(adminPrice(p))}</td><td><button class="table-action" data-edit-product="${p.id}">Edit</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="admin-empty">No active offers.</div>'}</section>`;
+  return `<div class="admin-page-heading"><div><h2>Offers</h2><p>Products currently on sale.</p></div></div><section class="admin-panel"><h3>Active offers (${withOffers.length})</h3>${withOffers.length ? `<div class="table-wrap"><table class="admin-table"><thead><tr><th>PRODUCT</th><th>ORIGINAL</th><th>OFFER</th><th>NEW PRICE</th><th>ACTION</th></tr></thead><tbody>${withOffers.map(p => `<tr><td><strong>${adminEsc(p.name)}</strong></td><td>${adminMoney(p.price)}</td><td><span class="status-pill pending">${p.offer.label || p.offer.value}</span></td><td style="color:var(--gold-light);font-weight:600">${adminMoney(adminPrice(p))}</td><td><button class="table-action" data-edit-product="${p.id}" type="button">Edit</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="admin-empty">No active offers.</div>'}</section>`;
 }
 
 /* ---------- SETTINGS ---------- */
@@ -235,7 +259,7 @@ function renderSettingsAdmin() {
   return `<div class="admin-page-heading"><div><h2>Store settings</h2><p>Appearance, language and data.</p></div></div>
   <section class="admin-panel"><h3>Appearance</h3><div class="admin-setting-row"><label for="admin-lang-select">Language</label><select id="admin-lang-select" class="admin-search"><option value="en" ${lang === 'en' ? 'selected' : ''}>English</option><option value="ar" ${lang === 'ar' ? 'selected' : ''}>العربية</option></select></div><div class="admin-setting-row"><label for="admin-radius-input">Corner radius — <span id="radius-value">${radius}px</span></label><input id="admin-radius-input" type="range" min="0" max="24" step="1" value="${radius}"></div></section>
   <section class="admin-panel"><h3>Database</h3><div class="settings-note"><strong style="color:var(--gold-light)">Status:</strong> ${dbReady ? '<span style="color:#8fd4a8">✅ Connected to Supabase</span>' : '<span style="color:#e7a4a4">❌ Not connected</span>'}<br><br>${dbReady ? 'All data is stored in Supabase (PostgreSQL).' : 'Supabase is not configured. Add URL and key in <code>js/config.js</code>.'}</div><button class="button button-outline" id="admin-reload-data" style="margin-top:12px">Reload from database</button></section>
-  <section class="admin-panel"><h3>About</h3><div class="settings-note"><strong style="color:var(--gold-light)">Authentication</strong><br>Admin: <code>admin@gmail.com</code> / <code>admin</code><br><br><strong style="color:var(--gold-light)">Production</strong><br>Add server-side validation and a payment provider before going live.</div></section>`;
+  <section class="admin-panel"><h3>About</h3><div class="settings-note"><strong style="color:var(--gold-light)">Authentication</strong><br>Roles are stored in the <code>customers</code> table. To grant admin access, run in the SQL editor:<br><code style="display:block;margin-top:8px;padding:8px;background:rgba(0,0,0,.3);border-radius:4px;font-size:11px">update public.customers set role = 'admin' where email = 'you@example.com';</code><br><strong style="color:var(--gold-light)">Production</strong><br>Add server-side validation and a payment provider before going live.</div></section>`;
 }
 
 /* ---------- PRODUCT FORM ---------- */
@@ -258,61 +282,80 @@ function showProductForm(product = null) {
   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+/* ============================================================
+   SAVE PRODUCT — مع flag لمنع re-render أثناء الحفظ
+   ============================================================ */
 async function saveAdminProduct(form) {
-  const data = new FormData(form);
-  const id = data.get('id');
-  const db = adminDB();
-  const current = id ? db.products.find(p => p.id === Number(id)) : null;
-
-  const offerType = String(data.get('offerType') || '');
-  const offerValue = Number(data.get('offerValue') || 0);
-  let offer = null;
-  if (offerType && offerValue > 0) {
-    offer = { type: offerType, value: offerValue, label: offerType === 'percent' ? `-${offerValue}%` : `-$${offerValue}` };
-  }
-
-  const product = {
-    id: current ? current.id : Math.max(0, ...db.products.map(p => p.id)) + 1,
-    name: String(data.get('name')).trim(),
-    category: String(data.get('category')),
-    price: Number(data.get('price')),
-    stock: Number(data.get('stock')),
-    subtitle: String(data.get('subtitle')).trim(),
-    description: String(data.get('description')).trim(),
-    bottle: current?.bottle || '',
-    badge: current?.badge || '',
-    bestSeller: data.get('bestSeller') === 'on',
-    offer,
-  };
-
-  if (!product.name || !product.subtitle || !product.price) {
-    adminToast('Please enter valid product details.');
-    return;
-  }
-
-  if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
-    adminToast('❌ Supabase not configured. Cannot save.');
-    return;
-  }
-
-  const submitBtn = form.querySelector('button[type="submit"]');
-  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+  console.log('[admin] saveAdminProduct start');
+  _adminSaving = true;  // ← يمنع noir:data-ready من إعادة الرسم
 
   try {
-    await noirSaveProductToDB(product);
-    if (current) {
-      NOIR_DB.products = NOIR_DB.products.map(p => p.id === current.id ? product : p);
-    } else {
-      NOIR_DB.products.unshift(product);
+    const data = new FormData(form);
+    const rawId = data.get('id');
+    const current = rawId ? adminDB().products.find(p => p.id === Number(rawId)) : null;
+
+    const offerType = String(data.get('offerType') || '');
+    const offerValue = Number(data.get('offerValue') || 0);
+    let offer = null;
+    if (offerType && offerValue > 0) {
+      offer = {
+        type: offerType,
+        value: offerValue,
+        label: offerType === 'percent' ? `-${offerValue}%` : `-$${offerValue}`,
+      };
     }
-    adminToast(current ? '✅ Product updated in database' : '✅ Product added to database');
-    renderAdmin('products');
-    if (typeof renderProducts === 'function' && document.getElementById('product-grid')) renderProducts();
-  } catch (err) {
-    console.error('[admin] save failed:', err);
-    adminToast('❌ Save failed: ' + (err.message || 'Unknown error'));
+
+    const product = {
+      ...(current ? { id: current.id } : {}),
+      name: String(data.get('name') || '').trim(),
+      category: String(data.get('category') || ''),
+      price: Number(data.get('price')),
+      stock: Number(data.get('stock')),
+      subtitle: String(data.get('subtitle') || '').trim(),
+      description: String(data.get('description') || '').trim(),
+      bottle: current?.bottle || '',
+      badge: current?.badge || '',
+      bestSeller: data.get('bestSeller') === 'on',
+      offer,
+    };
+
+    if (!product.name || !product.subtitle || !product.price) {
+      adminToast('Please enter valid product details.');
+      return;
+    }
+
+    if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
+      adminToast('❌ Supabase not configured. Cannot save.');
+      return;
+    }
+
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+
+    try {
+      console.log('[admin] saving product:', product);
+      const saved = await noirSaveProductToDB(product);
+      console.log('[admin] saved ✓', saved);
+
+      if (typeof noirRefreshStoreData === 'function') {
+        await noirRefreshStoreData();
+      } else if (typeof noirLoadFromSupabase === 'function') {
+        await noirLoadFromSupabase();
+      }
+
+      adminToast(current ? '✅ Product updated' : '✅ Product added');
+
+      // ✅ يفضل على tab الـ products
+      activePanel = 'products';
+      renderAdmin('products');
+    } catch (err) {
+      console.error('[admin] save failed:', err);
+      adminToast('❌ Save failed: ' + (err?.message || 'Unknown error'));
+    } finally {
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save product'; }
+    }
   } finally {
-    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save product'; }
+    _adminSaving = false;  // ← reset دايماً
   }
 }
 
@@ -326,8 +369,9 @@ async function updateOrderStatus(id, status) {
     await noirUpdateOrderStatusInDB(id, status);
     const order = NOIR_DB.orders.find(o => o.id === id);
     if (order) order.status = status;
+    activePanel = 'orders';
     renderAdmin('orders');
-    adminToast(`✅ Order ${id} marked ${status.toLowerCase()} in database.`);
+    adminToast(`✅ Order ${id} marked ${status.toLowerCase()}.`);
   } catch (err) {
     adminToast('❌ Update failed: ' + (err.message || 'Unknown error'));
   }
@@ -346,7 +390,9 @@ function showBundleForm(bundle = null) {
     form.elements.price.value = bundle.price;
     form.elements.description.value = bundle.description;
     form.elements.badge.value = bundle.badge || '';
-    Array.from(form.elements.productIds.options).forEach(o => { o.selected = bundle.productIds.includes(Number(o.value)); });
+    Array.from(form.elements.productIds.options).forEach(o => {
+      o.selected = bundle.productIds.includes(Number(o.value));
+    });
     form.elements.active.checked = bundle.active !== false;
     document.getElementById('bundle-form-title').textContent = 'Edit bundle';
   } else {
@@ -356,56 +402,89 @@ function showBundleForm(bundle = null) {
 }
 
 async function saveBundle(form) {
-  const data = new FormData(form);
-  const id = data.get('id');
-  const db = adminDB();
-  const current = id ? db.bundles.find(b => b.id === Number(id)) : null;
-  const productIds = Array.from(form.elements.productIds.selectedOptions).map(o => Number(o.value));
-  if (!productIds.length) { adminToast('Select at least one product.'); return; }
-
-  const bundle = {
-    id: current ? current.id : Math.max(0, ...db.bundles.map(b => b.id)) + 1,
-    name: String(data.get('name')).trim(),
-    description: String(data.get('description')).trim(),
-    productIds,
-    price: Number(data.get('price')),
-    badge: String(data.get('badge') || '').trim(),
-    active: form.elements.active.checked,
-  };
-  if (!bundle.name || !bundle.price) { adminToast('Please fill all bundle fields.'); return; }
-
-  if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
-    adminToast('❌ Supabase not configured. Cannot save.');
-    return;
-  }
-
-  const submitBtn = form.querySelector('button[type="submit"]');
-  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+  console.log('[admin] saveBundle start');
+  _adminSaving = true;
 
   try {
-    await noirSaveBundleToDB(bundle);
-    if (current) {
-      NOIR_DB.bundles = NOIR_DB.bundles.map(b => b.id === current.id ? bundle : b);
-    } else {
-      NOIR_DB.bundles.unshift(bundle);
+    const data = new FormData(form);
+    const rawId = data.get('id');
+    const current = rawId ? adminDB().bundles.find(b => b.id === Number(rawId)) : null;
+    const productIds = Array.from(form.elements.productIds.selectedOptions).map(o => Number(o.value));
+    if (!productIds.length) { adminToast('Select at least one product.'); return; }
+
+    const bundle = {
+      ...(current ? { id: current.id } : {}),
+      name: String(data.get('name') || '').trim(),
+      description: String(data.get('description') || '').trim(),
+      productIds,
+      price: Number(data.get('price')),
+      badge: String(data.get('badge') || '').trim(),
+      active: form.elements.active.checked,
+    };
+    if (!bundle.name || !bundle.price) { adminToast('Please fill all bundle fields.'); return; }
+
+    if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
+      adminToast('❌ Supabase not configured. Cannot save.');
+      return;
     }
-    adminToast(current ? '✅ Bundle updated in database' : '✅ Bundle added to database');
-    renderAdmin('bundles');
-  } catch (err) {
-    adminToast('❌ Save failed: ' + (err.message || 'Unknown error'));
+
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+
+    try {
+      console.log('[admin] saving bundle:', bundle);
+      const saved = await noirSaveBundleToDB(bundle);
+      console.log('[admin] bundle saved ✓', saved);
+
+      if (typeof noirRefreshStoreData === 'function') {
+        await noirRefreshStoreData();
+      } else if (typeof noirLoadFromSupabase === 'function') {
+        await noirLoadFromSupabase();
+      }
+
+      adminToast(current ? '✅ Bundle updated' : '✅ Bundle added');
+
+      activePanel = 'bundles';
+      renderAdmin('bundles');
+    } catch (err) {
+      console.error('[admin] bundle save failed:', err);
+      adminToast('❌ Save failed: ' + (err?.message || 'Unknown error'));
+    } finally {
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save bundle'; }
+    }
   } finally {
-    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Save bundle'; }
+    _adminSaving = false;
   }
 }
 
+/* ============================================================
+   🔒 FORM SUBMIT — CAPTURE PHASE
+   ============================================================ */
+document.addEventListener('submit', function (event) {
+  const target = event.target;
+  if (target && target.id === 'admin-product-form') {
+    event.preventDefault();
+    event.stopPropagation();
+    console.log('[admin] intercepted submit (capture): admin-product-form');
+    if (!target._bound) saveAdminProduct(target);
+    return false;
+  }
+  if (target && target.id === 'admin-bundle-form') {
+    event.preventDefault();
+    event.stopPropagation();
+    console.log('[admin] intercepted submit (capture): admin-bundle-form');
+    if (!target._bound) saveBundle(target);
+    return false;
+  }
+}, true);
+
+
 /* ---------- LISTENERS ---------- */
 document.addEventListener('DOMContentLoaded', function () {
-  // Nav
   document.querySelectorAll('.admin-nav[data-panel]').forEach(b =>
     b.addEventListener('click', () => renderAdmin(b.dataset.panel))
   );
 
-  // Sign out & return
   const back = document.getElementById('back-to-store');
   if (back) {
     back.addEventListener('click', function (e) {
@@ -418,89 +497,129 @@ document.addEventListener('DOMContentLoaded', function () {
   if (!adminContent) return;
 
   adminContent.addEventListener('click', async function (event) {
-    if (event.target.closest('#show-product-form')) showProductForm();
-    if (event.target.closest('#cancel-product-form')) { const p = document.getElementById('product-form-panel'); if (p) p.classList.add('hidden'); }
+    if (event.target.closest('#show-product-form')) {
+      event.preventDefault();
+      showProductForm();
+      return;
+    }
+    if (event.target.closest('#cancel-product-form')) {
+      const p = document.getElementById('product-form-panel');
+      if (p) p.classList.add('hidden');
+      return;
+    }
 
     const editProduct = event.target.closest('[data-edit-product]');
     if (editProduct) {
       const db = adminDB();
       const p = db.products.find(x => x.id === Number(editProduct.dataset.editProduct));
       if (p) {
-        if (activePanel !== 'products') { renderAdmin('products'); setTimeout(() => showProductForm(p), 50); }
-        else showProductForm(p);
+        if (activePanel !== 'products') {
+          renderAdmin('products');
+          setTimeout(() => showProductForm(p), 50);
+        } else showProductForm(p);
       }
+      return;
     }
 
     const delProduct = event.target.closest('[data-delete-product]');
     if (delProduct && confirm('Delete this product?')) {
       const pid = Number(delProduct.dataset.deleteProduct);
-      if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) { adminToast('❌ Supabase not configured.'); return; }
+      if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
+        adminToast('❌ Supabase not configured.');
+        return;
+      }
       try {
         await noirDeleteProductFromDB(pid);
         NOIR_DB.products = NOIR_DB.products.filter(p => p.id !== pid);
-        adminToast('✅ Product deleted from database');
+        adminToast('✅ Product deleted');
+        activePanel = 'products';
         renderAdmin('products');
       } catch (err) {
         adminToast('❌ Delete failed: ' + (err.message || 'Unknown error'));
       }
+      return;
     }
 
-    if (event.target.closest('#show-bundle-form')) showBundleForm();
-    if (event.target.closest('#cancel-bundle-form')) { const p = document.getElementById('bundle-form-panel'); if (p) p.classList.add('hidden'); }
+    if (event.target.closest('#show-bundle-form')) {
+      event.preventDefault();
+      showBundleForm();
+      return;
+    }
+    if (event.target.closest('#cancel-bundle-form')) {
+      const p = document.getElementById('bundle-form-panel');
+      if (p) p.classList.add('hidden');
+      return;
+    }
 
     const editBundle = event.target.closest('[data-edit-bundle]');
     if (editBundle) {
       const db = adminDB();
       const b = db.bundles.find(x => x.id === Number(editBundle.dataset.editBundle));
       if (b) showBundleForm(b);
+      return;
     }
 
     const delBundle = event.target.closest('[data-delete-bundle]');
     if (delBundle && confirm('Delete this bundle?')) {
       const bid = Number(delBundle.dataset.deleteBundle);
-      if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) { adminToast('❌ Supabase not configured.'); return; }
+      if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
+        adminToast('❌ Supabase not configured.');
+        return;
+      }
       try {
         await noirDeleteBundleFromDB(bid);
         NOIR_DB.bundles = NOIR_DB.bundles.filter(b => b.id !== bid);
-        adminToast('✅ Bundle deleted from database');
+        adminToast('✅ Bundle deleted');
+        activePanel = 'bundles';
         renderAdmin('bundles');
       } catch (err) {
         adminToast('❌ Delete failed: ' + (err.message || 'Unknown error'));
       }
+      return;
     }
 
     if (event.target.id === 'admin-reload-data') {
-      if (typeof noirLoadFromSupabase === 'function') {
+      if (typeof noirRefreshStoreData === 'function') {
+        adminToast('Reloading from database…');
+        await noirRefreshStoreData();
+        renderAdmin(activePanel);
+        adminToast('✅ Reloaded');
+      } else if (typeof noirLoadFromSupabase === 'function') {
         adminToast('Reloading from database…');
         await noirLoadFromSupabase();
-        renderAdmin();
+        renderAdmin(activePanel);
+        adminToast('✅ Reloaded');
       }
+      return;
     }
 
     const action = event.target.closest('[data-admin-action]');
-    if (action) renderAdmin(action.dataset.adminAction);
-  });
-
-  adminContent.addEventListener('submit', function (event) {
-    if (event.target.id === 'admin-product-form') { event.preventDefault(); saveAdminProduct(event.target); }
-    if (event.target.id === 'admin-bundle-form') { event.preventDefault(); saveBundle(event.target); }
+    if (action) {
+      event.preventDefault();
+      renderAdmin(action.dataset.adminAction);
+      return;
+    }
   });
 
   adminContent.addEventListener('input', function (event) {
     if (event.target.id === 'admin-product-search') {
       const q = event.target.value.toLowerCase();
       const db = adminDB();
-      document.getElementById('admin-products-table').innerHTML = productsTable(db.products.filter(p => `${p.name} ${p.category}`.toLowerCase().includes(q)));
+      document.getElementById('admin-products-table').innerHTML =
+        productsTable(db.products.filter(p => `${p.name} ${p.category}`.toLowerCase().includes(q)));
     }
     if (event.target.id === 'order-search') {
       const q = event.target.value.toLowerCase();
       const db = adminDB();
-      document.getElementById('orders-table').innerHTML = ordersTable(db.orders.filter(o => `${o.id} ${o.customer} ${o.email}`.toLowerCase().includes(q)), true);
+      document.getElementById('orders-table').innerHTML =
+        ordersTable(db.orders.filter(o => `${o.id} ${o.customer} ${o.email}`.toLowerCase().includes(q)), true);
     }
   });
 
   adminContent.addEventListener('change', function (event) {
-    if (event.target.matches('[data-order-status]')) updateOrderStatus(event.target.dataset.orderStatus, event.target.value);
+    if (event.target.matches('[data-order-status]')) {
+      updateOrderStatus(event.target.dataset.orderStatus, event.target.value);
+    }
     if (event.target.id === 'admin-lang-select') {
       if (typeof noirSetLang === 'function') noirSetLang(event.target.value);
       if (typeof noirSaveAppSettings === 'function') noirSaveAppSettings();
@@ -519,7 +638,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
 /* ---------- DATA READY ---------- */
 window.addEventListener('noir:data-ready', function (e) {
-  // Update status badge
   const dot = document.getElementById('db-status-dot');
   const label = document.getElementById('db-status-label');
   if (dot && label) {
@@ -532,9 +650,15 @@ window.addEventListener('noir:data-ready', function (e) {
       label.textContent = 'Local mode (offline)';
     }
   }
-  // Re-render
+
+  // ✅ مهم: مفيش renderAdmin هنا لو _adminSaving
+  if (_adminSaving) {
+    console.log('[admin] data-ready during save — skipping re-render');
+    return;
+  }
+
   if (typeof renderAdmin === 'function' && document.getElementById('admin-app')) {
-    renderAdmin();
+    renderAdmin(activePanel);
   }
 });
 
@@ -551,8 +675,9 @@ window.addEventListener('noir:data-ready', function (e) {
       return;
     }
 
-    console.info('[admin] session OK:', session.email);
-    if (typeof renderAdmin === 'function') renderAdmin('overview');
+    console.info('[admin] session OK:', session.email, '| source:', session.source);
+    // ✅ renderAdmin(activePanel) — دايماً 'overview' في الأول
+    if (typeof renderAdmin === 'function') renderAdmin(activePanel);
   };
 
   if (document.readyState === 'loading') {

@@ -21,19 +21,27 @@
           if (p.sans) r.style.setProperty('--font-sans', '"' + p.sans + '"');
           if (p.preset) r.setAttribute('data-theme', p.preset);
         }
-        var raw2 = localStorage.getItem('noir-store-data');
-        if (raw2) {
-          var d = JSON.parse(raw2);
-          if (d.settings && d.settings.radius != null) {
-            r.style.setProperty('--radius', d.settings.radius + 'px');
-          }
-          if (d.settings && d.settings.language) {
-            r.lang = d.settings.language;
-            r.dir = d.settings.language === 'ar' ? 'rtl' : 'ltr';
-          }
+        var s = localStorage.getItem('noir-app-settings');
+        if (s) {
+          var d = JSON.parse(s);
+          if (d.radius != null) r.style.setProperty('--radius', d.radius + 'px');
+          if (d.language) { r.lang = d.language; r.dir = d.language === 'ar' ? 'rtl' : 'ltr'; }
         }
       } catch (e) {}
     })();
+
+    // 1) البيانات موجودة في الذاكرة؟
+console.log('NOIR_DB.products.length:', NOIR_DB.products.length);
+
+// 2) الـ grid موجود؟
+console.log('grid exists:', !!document.getElementById('product-grid'));
+
+// 3) الـ grid فاضي؟
+console.log('grid innerHTML length:', document.getElementById('product-grid')?.innerHTML.length);
+
+// 4) جرّب render يدوي
+renderProducts();
+console.log('after manual render:', document.getElementById('product-grid')?.innerHTML.length); 
   </script>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -43,11 +51,7 @@
 
   <!-- Supabase SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-  <!-- Config (secrets) → before supabase-client -->
   <script src="js/config.js"></script>
-
-  <!-- Client init -->
   <script src="js/supabase-client.js" defer></script>
 
   <!-- Data -->
@@ -205,9 +209,9 @@
     <div>
       <h3>Follow our story</h3>
       <p>Instagram &nbsp; Pinterest &nbsp; TikTok</p>
-      <button class="text-link admin-link" id="admin-open">Admin preview ↗</button>
+      <button class="text-link admin-link" id="admin-open">Admin ↗</button>
     </div>
-    <p class="copyright">© 2026 NOIR Arabian Perfumes. Demo storefront for learning purposes.</p>
+    <p class="copyright">© 2026 NOIR Arabian Perfumes.</p>
   </footer>
 
   <div class="drawer-backdrop hidden" id="drawer-backdrop"></div>
@@ -224,17 +228,7 @@
     </div>
   </aside>
 
-  <dialog class="modal" id="account-modal">
-    <button class="modal-close" data-close="account-modal" aria-label="Close">×</button>
-    <p class="eyebrow">Welcome to NOIR</p>
-    <h2>Your account</h2>
-    <p class="modal-description">This is a frontend demo. Choose a preview role.</p>
-    <div class="role-actions">
-      <button class="button button-gold button-full" id="customer-login">Continue as customer</button>
-      <button class="button button-outline button-full" id="admin-login">Preview admin dashboard</button>
-    </div>
-    <p class="small-note">Demo only — no real credentials.</p>
-  </dialog>
+  <!-- ❌ account-modal اتشال بالكامل — account-button بقى بيعمل redirect -->
 
   <dialog class="modal product-modal" id="product-modal">
     <button class="modal-close" data-close="product-modal" aria-label="Close">×</button>
@@ -244,14 +238,14 @@
   <dialog class="modal checkout-modal" id="checkout-modal">
     <button class="modal-close" data-close="checkout-modal" aria-label="Close">×</button>
     <p class="eyebrow">Almost yours</p>
-    <h2>Checkout preview</h2>
-    <p class="modal-description">This demo does not process payments.</p>
+    <h2>Checkout</h2>
+    <p class="modal-description">Enter your details to place your order.</p>
     <form id="checkout-form" class="checkout-form">
       <label>Full name<input name="name" required placeholder="Your name"></label>
       <label>Email address<input name="email" type="email" required placeholder="you@example.com"></label>
       <label>Delivery address<textarea name="address" required rows="3" placeholder="Street, city, country"></textarea></label>
       <div class="subtotal"><span>Total</span><strong id="checkout-total">$0.00</strong></div>
-      <button class="button button-gold button-full" type="submit">Place demo order</button>
+      <button class="button button-gold button-full" type="submit">Place order</button>
     </form>
   </dialog>
 

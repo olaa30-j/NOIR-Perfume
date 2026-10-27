@@ -6,7 +6,6 @@
   <meta name="description" content="Your NOIR shopping bag.">
   <title>Shopping bag — NOIR Arabian Luxury</title>
 
-  <!-- Anti-flash: apply saved theme before CSS paints -->
   <script>
     (function () {
       var t = localStorage.getItem('noir-theme');
@@ -18,22 +17,25 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
+
+  <!-- Supabase SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js" defer></script>
+
+  <!-- Data -->
+  <script src="js/store.js" defer></script>
+  <script src="js/i18n.js" defer></script>
+  <script src="js/theme.js" defer></script>
+
+  <!-- Auth -->
   <script src="js/auth.js" defer></script>
+
+  <!-- UI -->
   <script src="js/app.js" defer></script>
   <script src="js/products.js" defer></script>
   <script src="js/cart.js" defer></script>
   <script src="js/page-init.js" defer></script>
-  <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      const d = document.getElementById("cart-drawer");
-      if (d) setTimeout(() => {
-        document.getElementById("drawer-backdrop").classList.remove("hidden");
-        d.classList.add("open");
-        d.setAttribute("aria-hidden", "false");
-        document.body.classList.add("lock-scroll");
-      }, 60);
-    });
-  </script>
 </head>
 <body>
   <div class="announcement">
@@ -83,9 +85,9 @@
     <div>
       <h3>Follow our story</h3>
       <p>Instagram &nbsp; Pinterest &nbsp; TikTok</p>
-      <button class="text-link admin-link" id="admin-open">Admin preview ↗</button>
+      <button class="text-link admin-link" id="admin-open">Admin ↗</button>
     </div>
-    <p class="copyright">© 2026 NOIR Arabian Perfumes. Demo storefront for learning purposes.</p>
+    <p class="copyright">© 2026 NOIR Arabian Perfumes.</p>
   </footer>
 
   <div class="drawer-backdrop hidden" id="drawer-backdrop"></div>
@@ -105,18 +107,6 @@
     </div>
   </aside>
 
-  <dialog class="modal" id="account-modal">
-    <button class="modal-close" data-close="account-modal" aria-label="Close">×</button>
-    <p class="eyebrow">Welcome to NOIR</p>
-    <h2>Your account</h2>
-    <p class="modal-description">This is a frontend demo. Choose a preview role to explore the experience.</p>
-    <div class="role-actions">
-      <button class="button button-gold button-full" id="customer-login">Continue as customer</button>
-      <button class="button button-outline button-full" id="admin-login">Preview admin dashboard</button>
-    </div>
-    <p class="small-note">Demo only — no real credentials are collected.</p>
-  </dialog>
-
   <dialog class="modal product-modal" id="product-modal">
     <button class="modal-close" data-close="product-modal" aria-label="Close">×</button>
     <div id="product-detail"></div>
@@ -125,14 +115,14 @@
   <dialog class="modal checkout-modal" id="checkout-modal">
     <button class="modal-close" data-close="checkout-modal" aria-label="Close">×</button>
     <p class="eyebrow">Almost yours</p>
-    <h2>Checkout preview</h2>
-    <p class="modal-description">This demo does not process payments. Enter your details to preview an order confirmation.</p>
+    <h2>Checkout</h2>
+    <p class="modal-description">Enter your details to place your order.</p>
     <form id="checkout-form" class="checkout-form">
       <label>Full name<input name="name" required placeholder="Your name"></label>
       <label>Email address<input name="email" type="email" required placeholder="you@example.com"></label>
       <label>Delivery address<textarea name="address" required rows="3" placeholder="Street, city, country"></textarea></label>
       <div class="subtotal"><span>Total</span><strong id="checkout-total">$0.00</strong></div>
-      <button class="button button-gold button-full" type="submit">Place demo order</button>
+      <button class="button button-gold button-full" type="submit">Place order</button>
     </form>
   </dialog>
 

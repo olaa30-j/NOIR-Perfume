@@ -2,9 +2,21 @@
    NOIR — Cart + Product modal (Supabase-only for orders)
    Cart items stay in localStorage (per-user).
    Orders are saved to Supabase.
+   After checkout: NO reload — UI refreshes in place.
    ============================================================ */
 
 const NOIR_CART_KEY = 'noir-cart';
+const NOIR_CART_DEBUG = true;
+
+function cartLog(...args) {
+  if (NOIR_CART_DEBUG) console.log('%c[CART]', 'color:#4fae7a;font-weight:bold', ...args);
+}
+function cartWarn(...args) {
+  if (NOIR_CART_DEBUG) console.warn('%c[CART]', 'color:#e0a800;font-weight:bold', ...args);
+}
+function cartErr(...args) {
+  console.error('%c[CART]', 'color:#e05252;font-weight:bold', ...args);
+}
 
 /* ---------- HELPERS ---------- */
 function cart$ (sel) { try { return document.querySelector(sel); } catch (e) { return null; } }
@@ -26,16 +38,21 @@ function cartComputePrice(p) {
   return p.price;
 }
 
-/* ---------- CART STATE (localStorage is fine — per user) ---------- */
+/* ---------- CART STATE ---------- */
 function loadCart() {
   try {
     const raw = localStorage.getItem(NOIR_CART_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      cartLog('Loaded cart from localStorage:', parsed.length, 'items');
+      return parsed;
+    }
+  } catch (e) { cartWarn('loadCart failed:', e); }
   return [];
 }
 function saveCart(cart) {
-  try { localStorage.setItem(NOIR_CART_KEY, JSON.stringify(cart)); } catch (e) {}
+  try { localStorage.setItem(NOIR_CART_KEY, JSON.stringify(cart)); }
+  catch (e) { cartWarn('saveCart failed:', e); }
 }
 
 let NOIR_CART = loadCart();
@@ -45,12 +62,13 @@ function addToCart(productId, qty) {
   const id = Number(productId);
   const quantity = Math.max(1, Number(qty) || 1);
   const product = cartGetProduct(id);
-  if (!product) { console.warn('[cart] product not found:', id); return; }
+  if (!product) { cartWarn('addToCart: product not found:', id); return; }
   const existing = NOIR_CART.find(item => item.id === id);
   if (existing) existing.qty += quantity;
   else NOIR_CART.push({ id, qty: quantity });
   saveCart(NOIR_CART);
   updateCartUI();
+  cartLog('Added to cart:', product.name, '| total items:', cartCount());
   if (typeof showToast === 'function') showToast(product.name + ' added to bag');
 }
 window.addToCart = addToCart;
@@ -61,6 +79,7 @@ function removeFromCart(productId) {
   NOIR_CART = NOIR_CART.filter(item => item.id !== id);
   saveCart(NOIR_CART);
   updateCartUI();
+  cartLog('Removed from cart:', id);
 }
 function updateQty(productId, delta) {
   const id = Number(productId);
@@ -125,6 +144,8 @@ function updateCartUI() {
 
   const coTotal = cart$('#checkout-total');
   if (coTotal) coTotal.textContent = cartMoney(cartSubtotal());
+
+  cartLog('updateCartUI →', { items: NOIR_CART.length, total: cartSubtotal() });
 }
 
 /* ---------- DRAWER ---------- */
@@ -134,6 +155,7 @@ function openCartDrawer() {
   if (drawer) { drawer.classList.add('open'); drawer.setAttribute('aria-hidden', 'false'); }
   if (backdrop) backdrop.classList.remove('hidden');
   document.body.classList.add('lock-scroll');
+  cartLog('Cart drawer opened');
 }
 function closeCartDrawer() {
   const drawer = cart$('#cart-drawer');
@@ -149,7 +171,7 @@ window.closeCartDrawer = closeCartDrawer;
 function openProductModal(productId) {
   const id = Number(productId);
   const p = cartGetProduct(id);
-  if (!p) return;
+  if (!p) { cartWarn('openProductModal: not found', id); return; }
 
   const modal = cart$('#product-modal');
   const detail = cart$('#product-detail');
@@ -212,14 +234,18 @@ document.addEventListener('click', function (e) {
       return;
     }
   } catch (err) {
-    console.error('[cart.js] click failed:', err);
+    cartErr('click failed:', err);
   }
 });
 
-/* ---------- CHECKOUT → Supabase ---------- */
+/* ============================================================
+   CHECKOUT → Supabase  (NO RELOAD)
+   ============================================================ */
 document.addEventListener('submit', async function (e) {
   if (e.target.id !== 'checkout-form') return;
   e.preventDefault();
+
+  cartLog('Checkout submit fired');
 
   const data = new FormData(e.target);
   const name = data.get('name');
@@ -227,6 +253,7 @@ document.addEventListener('submit', async function (e) {
   const address = data.get('address');
 
   if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
+    cartErr('Supabase not configured');
     if (typeof showToast === 'function') showToast('❌ Cannot place order — database not connected.');
     return;
   }
@@ -248,21 +275,40 @@ document.addEventListener('submit', async function (e) {
   if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Placing order…'; }
 
   try {
+    cartLog('Saving order to Supabase…', order);
     await noirSaveOrderToDB(order);
-    // Also push into in-memory NOIR_DB so admin sees it immediately
-    if (typeof NOIR_DB !== 'undefined' && NOIR_DB) NOIR_DB.orders.unshift(order);
+    cartLog('Order saved ✓', order.id);
+
+    // Push to in-memory DB so admin sees it immediately
+    if (typeof NOIR_DB !== 'undefined' && NOIR_DB) {
+      NOIR_DB.orders.unshift(order);
+      cartLog('Pushed to NOIR_DB.orders (total orders:', NOIR_DB.orders.length, ')');
+    }
+
+    // Clear cart
     NOIR_CART = [];
     saveCart(NOIR_CART);
     updateCartUI();
+
+    // Close modal + reset form
     const m = e.target.closest('dialog');
     if (m && typeof m.close === 'function') m.close();
     e.target.reset();
+
     if (typeof showToast === 'function') showToast('✅ Order ' + order.id + ' placed!');
+
+    // ✅ NO RELOAD — refresh UI in place
+    if (typeof window.noirRefreshStoreData === 'function') {
+      cartLog('Calling noirRefreshStoreData() (no reload)…');
+      await window.noirRefreshStoreData();
+    }
+    // Re-render cart badge + totals after data refresh
+    updateCartUI();
   } catch (err) {
-    console.error('[cart] order save failed:', err);
+    cartErr('order save failed:', err);
     if (typeof showToast === 'function') showToast('❌ Order failed: ' + (err.message || 'Unknown error'));
   } finally {
-    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Place demo order'; }
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Place order'; }
   }
 });
 
@@ -274,6 +320,7 @@ document.addEventListener('DOMContentLoaded', function () {
     btn._cartBound = true;
     btn.addEventListener('click', e => { e.preventDefault(); openCartDrawer(); });
   });
+  cartLog('cart.js initialized');
 });
 
 window.addEventListener('storage', function (e) {

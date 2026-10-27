@@ -4,7 +4,18 @@
    No localStorage fallback for products/orders/bundles.
    ============================================================ */
 
-/* ---------- STATE (in-memory only) ---------- */
+const STORE_DEBUG = true;
+function storeLog(...args) {
+  if (STORE_DEBUG) console.log('%c[STORE]', 'color:#4fae7a;font-weight:bold', ...args);
+}
+function storeWarn(...args) {
+  if (STORE_DEBUG) console.warn('%c[STORE]', 'color:#e0a800;font-weight:bold', ...args);
+}
+function storeErr(...args) {
+  console.error('%c[STORE]', 'color:#e05252;font-weight:bold', ...args);
+}
+
+/* ---------- STATE ---------- */
 let NOIR_DB = {
   products: [],
   bundles: [],
@@ -12,9 +23,6 @@ let NOIR_DB = {
   customers: [],
   settings: { language: 'en', radius: 6 },
 };
-
-let products = NOIR_DB.products;
-let orders = NOIR_DB.orders;
 
 /* ---------- SUPABASE DETECTION ---------- */
 function noirHasSupabase() {
@@ -43,7 +51,7 @@ function noirComputePrice(product) {
   return product.price;
 }
 
-/* ---------- APP SETTINGS (language, radius) — local only ---------- */
+/* ---------- APP SETTINGS ---------- */
 const NOIR_APP_SETTINGS_KEY = 'noir-app-settings';
 
 function noirLoadAppSettings() {
@@ -52,25 +60,32 @@ function noirLoadAppSettings() {
     if (raw) {
       const data = JSON.parse(raw);
       Object.assign(NOIR_DB.settings, data);
+      storeLog('App settings loaded:', NOIR_DB.settings);
     }
-  } catch (e) {}
+  } catch (e) { storeWarn('loadAppSettings failed:', e); }
 }
 
 function noirSaveAppSettings() {
   try {
     localStorage.setItem(NOIR_APP_SETTINGS_KEY, JSON.stringify(NOIR_DB.settings));
-  } catch (e) {}
+    storeLog('App settings saved:', NOIR_DB.settings);
+  } catch (e) { storeWarn('saveAppSettings failed:', e); }
 }
 
-/* ---------- LOAD ALL FROM SUPABASE ---------- */
+/* ============================================================
+   LOAD ALL FROM SUPABASE
+   ============================================================ */
 async function noirLoadFromSupabase() {
   if (!noirHasSupabase()) {
-    console.warn('[store] Supabase not configured — app will be empty.');
+    storeWarn('Supabase not configured — app will be empty.');
     window.dispatchEvent(new CustomEvent('noir:data-ready', {
       detail: { source: 'none', error: 'Supabase not configured' },
     }));
     return false;
   }
+
+  storeLog('Loading all data from Supabase…');
+
   try {
     const [productsRes, bundlesRes, ordersRes, customersRes] = await Promise.all([
       window.db.from('products').select('*').order('id', { ascending: true }),
@@ -125,16 +140,14 @@ async function noirLoadFromSupabase() {
       spent: Number(row.spent) || 0,
     }));
 
-    products = NOIR_DB.products;
-    orders = NOIR_DB.orders;
+    storeLog(`Loaded: ${NOIR_DB.products.length} products, ${NOIR_DB.orders.length} orders, ${NOIR_DB.bundles.length} bundles, ${NOIR_DB.customers.length} customers`);
 
-    console.info(`[store] loaded ${NOIR_DB.products.length} products, ${NOIR_DB.orders.length} orders from Supabase`);
     window.dispatchEvent(new CustomEvent('noir:data-ready', {
       detail: { source: 'supabase' },
     }));
     return true;
   } catch (err) {
-    console.error('[store] Supabase load failed:', err);
+    storeErr('Supabase load failed:', err);
     window.dispatchEvent(new CustomEvent('noir:data-ready', {
       detail: { source: 'none', error: err.message },
     }));
@@ -142,11 +155,52 @@ async function noirLoadFromSupabase() {
   }
 }
 
-/* ---------- WRITE: PRODUCT ---------- */
+/* ============================================================
+   🔄 REFRESH WITHOUT RELOAD
+   ============================================================ */
+async function noirRefreshStoreData() {
+  storeLog('noirRefreshStoreData() start — no page reload');
+
+  const ok = await noirLoadFromSupabase();
+
+  if (!ok) {
+    storeWarn('Refresh failed — data may be stale');
+    return false;
+  }
+
+  try {
+    if (typeof renderProducts === 'function' && document.getElementById('product-grid')) {
+      renderProducts();
+      storeLog('Re-rendered products grid');
+    }
+    if (typeof renderBestSellers === 'function' && document.getElementById('bestsellers-grid')) {
+      renderBestSellers();
+      storeLog('Re-rendered best sellers');
+    }
+    if (typeof renderBundles === 'function' && document.getElementById('bundles-grid')) {
+      renderBundles();
+      storeLog('Re-rendered bundles');
+    }
+    if (typeof updateCartUI === 'function') {
+      updateCartUI();
+      storeLog('Updated cart UI');
+    }
+  } catch (e) {
+    storeWarn('Re-render failed:', e);
+  }
+
+  storeLog('noirRefreshStoreData() done ✓');
+  return true;
+}
+
+/* ============================================================
+   WRITE: PRODUCT
+   ⚠️ INSERT بدون id (GENERATED ALWAYS) — UPDATE بـ id
+   ============================================================ */
 async function noirSaveProductToDB(product) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
+
   const row = {
-    id: product.id,
     name: product.name,
     category: product.category,
     price: product.price,
@@ -158,23 +212,57 @@ async function noirSaveProductToDB(product) {
     best_seller: !!product.bestSeller,
     offer: product.offer || null,
   };
-  const { data, error } = await window.db.from('products').upsert(row).select();
-  if (error) throw error;
-  return data && data[0] ? data[0] : row;
+
+  if (product.id) {
+    // تعديل
+    row.id = product.id;
+    storeLog('Upserting product (update):', row.name, '| id:', row.id);
+    const { data, error } = await window.db
+      .from('products')
+      .upsert(row, { onConflict: 'id' })
+      .select();
+    if (error) {
+      storeErr('Product update failed:', error);
+      throw error;
+    }
+    storeLog('Product updated ✓', data && data[0] ? data[0].id : row.id);
+    return data && data[0] ? data[0] : row;
+  } else {
+    // إضافة جديدة — من غير id
+    storeLog('Inserting product (new):', row.name);
+    const { data, error } = await window.db
+      .from('products')
+      .insert(row)
+      .select();
+    if (error) {
+      storeErr('Product insert failed:', error);
+      throw error;
+    }
+    storeLog('Product inserted ✓', data && data[0] ? data[0].id : 'no id returned');
+    return data && data[0] ? data[0] : row;
+  }
 }
 
 async function noirDeleteProductFromDB(id) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
+  storeLog('Deleting product:', id);
   const { error } = await window.db.from('products').delete().eq('id', Number(id));
-  if (error) throw error;
+  if (error) {
+    storeErr('Product delete failed:', error);
+    throw error;
+  }
+  storeLog('Product deleted ✓', id);
   return true;
 }
 
-/* ---------- WRITE: BUNDLE ---------- */
+/* ============================================================
+   WRITE: BUNDLE
+   ⚠️ INSERT بدون id — UPDATE بـ id
+   ============================================================ */
 async function noirSaveBundleToDB(bundle) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
+
   const row = {
-    id: bundle.id,
     name: bundle.name,
     description: bundle.description,
     product_ids: bundle.productIds,
@@ -182,21 +270,53 @@ async function noirSaveBundleToDB(bundle) {
     badge: bundle.badge || '',
     active: bundle.active !== false,
   };
-  const { data, error } = await window.db.from('bundles').upsert(row).select();
-  if (error) throw error;
-  return data && data[0] ? data[0] : row;
+
+  if (bundle.id) {
+    row.id = bundle.id;
+    storeLog('Upserting bundle (update):', row.name, '| id:', row.id);
+    const { data, error } = await window.db
+      .from('bundles')
+      .upsert(row, { onConflict: 'id' })
+      .select();
+    if (error) {
+      storeErr('Bundle update failed:', error);
+      throw error;
+    }
+    storeLog('Bundle updated ✓', data && data[0] ? data[0].id : row.id);
+    return data && data[0] ? data[0] : row;
+  } else {
+    storeLog('Inserting bundle (new):', row.name);
+    const { data, error } = await window.db
+      .from('bundles')
+      .insert(row)
+      .select();
+    if (error) {
+      storeErr('Bundle insert failed:', error);
+      throw error;
+    }
+    storeLog('Bundle inserted ✓', data && data[0] ? data[0].id : 'no id returned');
+    return data && data[0] ? data[0] : row;
+  }
 }
 
 async function noirDeleteBundleFromDB(id) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
+  storeLog('Deleting bundle:', id);
   const { error } = await window.db.from('bundles').delete().eq('id', Number(id));
-  if (error) throw error;
+  if (error) {
+    storeErr('Bundle delete failed:', error);
+    throw error;
+  }
+  storeLog('Bundle deleted ✓', id);
   return true;
 }
 
-/* ---------- WRITE: ORDER ---------- */
+/* ============================================================
+   WRITE: ORDER
+   ============================================================ */
 async function noirSaveOrderToDB(order) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
+
   const row = {
     id: order.id,
     customer_name: order.customer,
@@ -205,15 +325,27 @@ async function noirSaveOrderToDB(order) {
     status: order.status || 'Processing',
     items: order.items || [],
   };
+
+  storeLog('Saving order to Supabase:', row.id, '| total:', row.total);
+
   const { data, error } = await window.db.from('orders').upsert(row).select();
-  if (error) throw error;
+  if (error) {
+    storeErr('Order save failed:', error);
+    throw error;
+  }
+  storeLog('Order saved ✓', data && data[0] ? data[0].id : row.id);
   return data && data[0] ? data[0] : row;
 }
 
 async function noirUpdateOrderStatusInDB(id, status) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
+  storeLog('Updating order status:', id, '→', status);
   const { error } = await window.db.from('orders').update({ status }).eq('id', id);
-  if (error) throw error;
+  if (error) {
+    storeErr('Order status update failed:', error);
+    throw error;
+  }
+  storeLog('Order status updated ✓');
   return true;
 }
 
@@ -223,6 +355,7 @@ window.noirGetBundle = noirGetBundle;
 window.noirComputePrice = noirComputePrice;
 window.noirHasSupabase = noirHasSupabase;
 window.noirLoadFromSupabase = noirLoadFromSupabase;
+window.noirRefreshStoreData = noirRefreshStoreData;
 window.noirSaveProductToDB = noirSaveProductToDB;
 window.noirDeleteProductFromDB = noirDeleteProductFromDB;
 window.noirSaveBundleToDB = noirSaveBundleToDB;

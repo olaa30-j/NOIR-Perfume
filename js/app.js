@@ -1,6 +1,8 @@
 /* ============================================================
    NOIR — shared utilities + UI (storefront)
    Fully guarded: no uncaught errors ever.
+   Auth is handled EXCLUSIVELY by auth.js (Supabase only).
+   This file must NOT contain any auth logic, redirects, or demo code.
    ============================================================ */
 
 /* ---------- SAFE HELPERS ---------- */
@@ -274,7 +276,7 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 /* ============================================================
-   8. NAVBAR BUTTONS — Search + Account + Login
+   8. NAVBAR BUTTONS — Search + Account (NO auth logic here)
    ============================================================ */
 document.addEventListener('DOMContentLoaded', function () {
   try {
@@ -292,136 +294,49 @@ document.addEventListener('DOMContentLoaded', function () {
       });
     }
 
-    /* ---- Account button ---- */
+    /* ---- Account button ----
+       auth.js already updates the header UI based on session.
+       Here we only redirect based on session role. */
     const accountBtn = $('#account-button');
     if (accountBtn) {
-      accountBtn.addEventListener('click', function (e) {
+      accountBtn.addEventListener('click', async function (e) {
         e.preventDefault();
 
-        const session = (typeof noirGetSession === 'function') ? noirGetSession() : null;
-        if (session) {
-          window.location.href = 'account.html';
-          return;
+        if (typeof window.noirGetSession === 'function') {
+          try {
+            const session = await window.noirGetSession();
+            if (session) {
+              window.location.href = session.role === 'admin' ? 'admin.html' : 'account.html';
+              return;
+            }
+          } catch (err) {
+            console.warn('[app.js] account button session check failed:', err);
+          }
         }
 
-        const modal = $('#account-modal');
-        if (modal && typeof modal.showModal === 'function') {
-          modal.showModal();
-        } else if (modal) {
-          modal.setAttribute('open', '');
-        }
+        // Not signed in → go to login
+        window.location.href = 'login.html';
       });
     }
 
-    /* ---- Account modal: customer login ---- */
-    const customerBtn = $('#customer-login');
-    if (customerBtn) {
-      customerBtn.addEventListener('click', function () {
-        if (typeof noirLogin === 'function') {
-          noirLogin({ name: 'Guest Customer', email: 'guest@noir.demo', role: 'customer' });
-        }
-        const m = $('#account-modal');
-        if (m && typeof m.close === 'function') m.close();
-        window.location.href = 'account.html';
-      });
-    }
-
-    /* ---- Account modal: admin login ---- */
-    const adminBtn = $('#admin-login');
-    if (adminBtn) {
-      adminBtn.addEventListener('click', function () {
-        if (typeof noirLogin === 'function') {
-          noirLogin({ name: 'Store Admin', email: 'admin@gmail.com', role: 'admin' });
-        }
-        const m = $('#account-modal');
-        if (m && typeof m.close === 'function') m.close();
-        window.location.href = 'admin.html';
-      });
-    }
-
-    /* ---- Admin preview link in footer ---- */
+    /* ---- Admin link in footer ---- */
     const adminOpen = $('#admin-open');
     if (adminOpen) {
       adminOpen.addEventListener('click', function (e) {
         e.preventDefault();
-        const modal = $('#account-modal');
-        if (modal && typeof modal.showModal === 'function') {
-          modal.showModal();
-        }
-      });
-    }
-
-    /* ---- Login form (login.html) ---- */
-    const loginForm = $('#login-form');
-    if (loginForm) {
-      loginForm.addEventListener('submit', function (e) {
-        e.preventDefault();
-        const data = new FormData(loginForm);
-        const email = String(data.get('email') || '').trim().toLowerCase();
-        const password = String(data.get('password') || '');
-
-        const errorEl = $('#login-error');
-        const params = new URLSearchParams(location.search);
-        const wantRole = params.get('role');
-        const nextUrl = params.get('next');
-
-        // Demo rule: admin@gmail.com / admin → admin; anything else → customer
-        let role = 'customer';
-        if (email === 'admin@gmail.com' && password === 'admin') {
-          role = 'admin';
-        } else if (wantRole === 'admin') {
-          if (errorEl) {
-            errorEl.textContent = 'Admin requires admin@gmail.com / admin';
-            errorEl.style.display = 'block';
-          }
-          return;
-        }
-
-        if (!email || !password) {
-          if (errorEl) {
-            errorEl.textContent = 'Please fill all fields.';
-            errorEl.style.display = 'block';
-          }
-          return;
-        }
-
-        if (typeof noirLogin === 'function') {
-          noirLogin({
-            name: role === 'admin' ? 'Store Admin' : email.split('@')[0],
-            email: email,
-            role: role,
-          });
-        }
-
-        const redirect = nextUrl
-          ? nextUrl
-          : (role === 'admin' ? 'admin.html' : 'account.html');
-        window.location.href = redirect;
+        window.location.href = 'login.html?role=admin&next=admin.html';
       });
     }
 
     /* ---- Sign out button (account.html) ---- */
     const signoutBtn = $('#signout-btn');
     if (signoutBtn) {
-      signoutBtn.addEventListener('click', function () {
-        if (typeof noirLogout === 'function') {
-          noirLogout('login.html');
+      signoutBtn.addEventListener('click', async function (e) {
+        e.preventDefault();
+        if (typeof window.noirLogout === 'function') {
+          await window.noirLogout('login.html');
         } else {
-          try { localStorage.removeItem('noir-session'); } catch (e) {}
           window.location.href = 'login.html';
-        }
-      });
-    }
-
-    /* ---- Back-to-store (admin.html) ---- */
-    const backBtn = $('#back-to-store');
-    if (backBtn) {
-      backBtn.addEventListener('click', function () {
-        if (typeof noirLogout === 'function') {
-          noirLogout('index.html');
-        } else {
-          try { localStorage.removeItem('noir-session'); } catch (e) {}
-          window.location.href = 'index.html';
         }
       });
     }
@@ -431,12 +346,6 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 /* ============================================================
-   9. ADMIN GUARD for admin.html
+   9. NOTE: admin.html guard is handled by admin.js (bootAdmin).
+   Do NOT add any redirect logic here — it would cause loops.
    ============================================================ */
-document.addEventListener('DOMContentLoaded', function () {
-  if (!document.getElementById('admin-app')) return;
-  const session = (typeof noirGetSession === 'function') ? noirGetSession() : null;
-  if (!session || session.role !== 'admin') {
-    window.location.replace('login.html?role=admin&next=admin.html');
-  }
-});
