@@ -37,7 +37,7 @@
   <script src="js/i18n.js" defer></script>
   <script src="js/theme.js" defer></script>
   <script src="js/auth.js" defer></script>
-  <script src="js/app.js" defer></script>
+  <script  type="module" src="js/app.js"></script>
   <script src="js/cart.js" defer></script>
   <script type="module" src="js/components/index.js"></script>
 
@@ -69,7 +69,7 @@
             <input name="email" type="email" required placeholder="you@example.com" autocomplete="email">
           </label>
           <label>Password
-            <input name="password" type="password" required placeholder="••••••" autocomplete="current-password" minlength="6">
+            <input name="password" type="password" required placeholder="••••••" autocomplete="current-password" minlength="5">
           </label>
           <p class="small-note" id="login-error" style="color:#e7a4a4;margin:0;display:none"></p>
           <button class="button button-gold button-full" type="submit">Sign in</button>

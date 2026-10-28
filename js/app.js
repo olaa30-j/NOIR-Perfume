@@ -1,3 +1,5 @@
+import { onLayoutReady } from './components/index.js';
+
 /* ============================================================
    NOIR — shared utilities + UI (storefront)
    Fully guarded: no uncaught errors ever.
@@ -40,9 +42,31 @@ function showToast(msg) {
 
 /* Safe accessors */
 function noirDB() {
-  if (typeof NOIR_DB !== 'undefined' && NOIR_DB) return NOIR_DB;
-  return { products: [], orders: [], bundles: [], customers: [], settings: { language: 'en', radius: 6 } };
+  if (typeof window.NOIR_DB !== 'undefined' && window.NOIR_DB) return window.NOIR_DB;
+  return { products: [], bundles: [], orders: [], customers: [], settings: { language: 'en', radius: 6 } };
 }
+
+window.addEventListener('noir:data-ready', function (e) {
+  try {
+    console.log('[app.js] noir:data-ready →', e.detail);
+    if ($('#product-grid')) renderProducts();
+    if ($('#bestsellers-grid')) renderBestSellers();
+    if ($('#bundles-grid')) renderBundles();
+  } catch (err) {
+    console.error('[app.js] re-render after data-ready failed:', err);
+  }
+});
+
+window.addEventListener('noir:settings-ready', function (e) {
+  try {
+    const settings = e.detail;
+    if (settings?.language) {
+      document.documentElement.lang = settings.language;
+      document.documentElement.dir = settings.language === 'ar' ? 'rtl' : 'ltr';
+    }
+  } catch (err) { /* ignore */ }
+});
+
 function t(key) {
   return typeof noirT === 'function' ? noirT(key) : key;
 }
@@ -58,8 +82,9 @@ function getBundleById(id) {
 
 /* ============================================================
    1. MOBILE MENU + LANGUAGE SWITCHER
+   (جوه site-header → محتاج onLayoutReady)
    ============================================================ */
-document.addEventListener('DOMContentLoaded', function () {
+onLayoutReady(function () {
   try {
     const toggle = $('#menu-toggle');
     const nav = $('#main-nav');
@@ -173,6 +198,7 @@ function renderBundles() {
 
 /* ============================================================
    4. CLICK DELEGATION (add-to-cart, bundles, quick-view)
+   (event delegation على document → مش محتاج onLayoutReady)
    ============================================================ */
 document.addEventListener('click', function (e) {
   try {
@@ -209,8 +235,9 @@ document.addEventListener('click', function (e) {
 
 /* ============================================================
    5. FILTERS + INITIAL RENDER
+   (العناصر في index.html — onLayoutReady آمنة في كل الحالات)
    ============================================================ */
-document.addEventListener('DOMContentLoaded', function () {
+onLayoutReady(function () {
   try {
     const search = $('#product-search');
     const category = $('#category-filter');
@@ -252,6 +279,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 /* ============================================================
    6. LISTEN FOR LANGUAGE CHANGES
+   (event على window → مش محتاج onLayoutReady)
    ============================================================ */
 window.addEventListener('noir:language', function () {
   try {
@@ -263,22 +291,31 @@ window.addEventListener('noir:language', function () {
 
 /* ============================================================
    7. NEWSLETTER (cosmetic)
+   (العنصر في index.html — onLayoutReady آمنة)
    ============================================================ */
-document.addEventListener('DOMContentLoaded', function () {
-  const form = $('#newsletter-form');
-  if (form) {
-    form.addEventListener('submit', function (e) {
-      e.preventDefault();
-      showToast('Thanks for subscribing!');
-      form.reset();
-    });
+onLayoutReady(function () {
+  try {
+    const form = $('#newsletter-form');
+    if (form) {
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        showToast('Thanks for subscribing!');
+        form.reset();
+      });
+    }
+  } catch (e) {
+    console.error('[app.js] newsletter init failed:', e);
   }
 });
 
 /* ============================================================
-   8. NAVBAR BUTTONS — Search + Account (NO auth logic here)
+   8. NAVBAR BUTTONS — Search + Account
+   (search/account في site-header، admin في site-footer → onLayoutReady)
+   (signout-btn في account.html → DOMContentLoaded)
    ============================================================ */
-document.addEventListener('DOMContentLoaded', function () {
+
+/* --- 8a. أزرار الـ layout (header/footer) --- */
+onLayoutReady(function () {
   try {
     /* ---- Search button ---- */
     const searchToggle = $('#search-toggle');
@@ -327,8 +364,14 @@ document.addEventListener('DOMContentLoaded', function () {
         window.location.href = 'login.html?role=admin&next=admin.html';
       });
     }
+  } catch (e) {
+    console.error('[app.js] navbar buttons init failed:', e);
+  }
+});
 
-    /* ---- Sign out button (account.html) ---- */
+/* --- 8b. Sign out button --- */
+document.addEventListener('DOMContentLoaded', function () {
+  try {
     const signoutBtn = $('#signout-btn');
     if (signoutBtn) {
       signoutBtn.addEventListener('click', async function (e) {
@@ -341,7 +384,7 @@ document.addEventListener('DOMContentLoaded', function () {
       });
     }
   } catch (e) {
-    console.error('[app.js] navbar buttons init failed:', e);
+    console.error('[app.js] signout init failed:', e);
   }
 });
 

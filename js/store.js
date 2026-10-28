@@ -32,6 +32,12 @@ let NOIR_DB = {
   },
 };
 
+/* ---------- EXPOSE TO GLOBAL (CRITICAL) ----------
+   `let` at top-level does NOT create window.NOIR_DB.
+   app.js (and other files) need this on window.
+   We also re-assign window.NOIR_DB whenever NOIR_DB is re-assigned. */
+window.NOIR_DB = NOIR_DB;
+
 /* ---------- SUPABASE DETECTION ---------- */
 function noirHasSupabase() {
   return typeof window.db !== 'undefined'
@@ -104,6 +110,7 @@ function noirMigrateLegacySettings() {
 async function noirLoadAppSettings() {
   if (!noirHasSupabase()) {
     storeWarn('noirLoadAppSettings: Supabase not configured');
+    window.dispatchEvent(new CustomEvent('noir:settings-ready', { detail: NOIR_DB.settings }));
     return false;
   }
   try {
@@ -224,6 +231,10 @@ async function noirLoadFromSupabase() {
       orders: row.orders || 0,
       spent: Number(row.spent) || 0,
     }));
+
+    /* Keep window.NOIR_DB in sync (it's the same object reference,
+       but we re-assign explicitly for safety and for debuggers). */
+    window.NOIR_DB = NOIR_DB;
 
     storeLog(`Loaded: ${NOIR_DB.products.length} products, ${NOIR_DB.orders.length} orders, ${NOIR_DB.bundles.length} bundles, ${NOIR_DB.customers.length} customers`);
 
