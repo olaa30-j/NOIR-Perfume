@@ -1,10 +1,12 @@
 /* ============================================================
-   THEME CUSTOMIZER — full user control + radius
-   Radius is read from Supabase (NOIR_DB.settings.radius) and
-   persisted through noirSaveAppSettings().
+   THEME CUSTOMIZER — DB-first + loading screen
+   - Source of truth: Supabase (NOIR_DB.settings)
+   - Loading screen shows until DB responds (or 8s timeout)
+   - No localStorage read on first paint (avoids flash)
+   - localStorage is used ONLY as a write-through cache
    ============================================================ */
 (function initThemeCustomizer() {
-    const STORAGE = 'noir-theme-prefs';
+    const STORAGE = 'noir-theme-prefs'; // cache only
 
     const PRESETS = {
         midnight: { bg: '#07111c', text: '#f5ead7', accent: '#c89b55', serif: 'Cormorant Garamond', sans: 'DM Sans', label: 'Midnight' },
@@ -22,21 +24,47 @@
 
     const DEFAULT = { ...PRESETS.midnight, preset: 'midnight', fontPair: 'classic' };
 
-    let prefs = load();
+    // مفيش قراءة من localStorage في البداية — DEFAULT فقط.
+    // DB هو المصدر، واللودر مخفي لحد ما DB يوصل.
+    let prefs = { ...DEFAULT };
+    let dbLoaded = false;
 
-    function load() {
-        try {
-            const raw = localStorage.getItem(STORAGE);
-            if (raw) return { ...DEFAULT, ...JSON.parse(raw) };
-        } catch (e) { }
-        return { ...DEFAULT };
-    }
-
-    function save() {
+    /* ---------- Cache (write-only, لتحسين الأداء) ---------- */
+    function writeCache() {
         try { localStorage.setItem(STORAGE, JSON.stringify(prefs)); } catch (e) { }
     }
 
+    /* ---------- Save (DB + cache) ---------- */
+    function save() {
+        writeCache();
+        if (typeof noirSaveAppSettings !== 'function') {
+            console.warn('[theme] noirSaveAppSettings not available');
+            return;
+        }
+        if (typeof NOIR_DB === 'undefined' || !NOIR_DB.settings) {
+            console.warn('[theme] NOIR_DB.settings not available');
+            return;
+        }
+
+        const payload = {
+            theme: prefs.preset || null,
+            fontSerif: prefs.serif || null,
+            fontSans: prefs.sans || null,
+            bgColor: prefs.bg || null,
+            textColor: prefs.text || null,
+            accentColor: prefs.accent || null,
+        };
+        Object.assign(NOIR_DB.settings, payload);
+
+        noirSaveAppSettings(payload).catch(err => {
+            console.warn('[theme] DB save failed:', err);
+            if (typeof showToast === 'function') showToast('Theme saved locally — DB error');
+        });
+    }
+
+    /* ---------- Helpers ---------- */
     function isLightColor(hex) {
+        if (!hex || hex.length < 4) return false;
         const c = hex.replace('#', '');
         if (c.length < 6) return false;
         const r = parseInt(c.substr(0, 2), 16);
@@ -79,6 +107,52 @@
         document.documentElement.style.setProperty('--radius', val + 'px');
     }
 
+    /* ---------- Loader ---------- */
+    function hideLoader() {
+        const el = document.getElementById('noir-loader');
+        if (el) {
+            el.classList.add('hidden');
+            setTimeout(() => { try { el.remove(); } catch (e) { } }, 400);
+        }
+    }
+
+    // fallback: لو DB ماوصلش في 8 ثواني، نخفي اللودر
+    let loaderFallbackTimer = setTimeout(function () {
+        console.warn('[theme] DB timeout (8s) — hiding loader');
+        hideLoader();
+    }, 8000);
+
+    /* ---------- DB → prefs (المصدر الرسمي) ---------- */
+    function applyFromDB() {
+        const s = (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) || {};
+
+        // 1) preset
+        if (s.theme && PRESETS[s.theme]) {
+            prefs = { ...prefs, ...PRESETS[s.theme], preset: s.theme };
+        } else if (s.theme === 'custom') {
+            prefs.preset = 'custom';
+        }
+
+        // 2) manual font/color overrides (أولوية أعلى من preset)
+        if (s.fontSerif) prefs.serif = s.fontSerif;
+        if (s.fontSans) prefs.sans = s.fontSans;
+        if (s.bgColor) prefs.bg = s.bgColor;
+        if (s.textColor) prefs.text = s.textColor;
+        if (s.accentColor) prefs.accent = s.accentColor;
+
+        apply();
+
+        if (typeof s.radius === 'number') applyRadius(s.radius);
+
+        dbLoaded = true;
+        writeCache();
+
+        // ✅ DB وصل — اخفي اللودر
+        clearTimeout(loaderFallbackTimer);
+        hideLoader();
+    }
+
+    /* ---------- UI ---------- */
     function buildUI() {
         if (document.getElementById('theme-customizer')) return;
         if (!document.getElementById('admin-app')) return;
@@ -157,6 +231,14 @@
             b.title = p.label;
             b.addEventListener('click', () => {
                 prefs = { ...prefs, ...p, preset: id };
+                if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) {
+                    NOIR_DB.settings.theme = id;
+                    NOIR_DB.settings.fontSerif = p.serif;
+                    NOIR_DB.settings.fontSans = p.sans;
+                    NOIR_DB.settings.bgColor = p.bg;
+                    NOIR_DB.settings.textColor = p.text;
+                    NOIR_DB.settings.accentColor = p.accent;
+                }
                 apply(); save(); syncUI();
             });
             presetBox.appendChild(b);
@@ -167,6 +249,11 @@
             inp.addEventListener('input', () => {
                 prefs[inp.dataset.key] = inp.value;
                 prefs.preset = 'custom';
+                if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) {
+                    const keyMap = { bg: 'bgColor', text: 'textColor', accent: 'accentColor' };
+                    NOIR_DB.settings[keyMap[inp.dataset.key]] = inp.value;
+                    NOIR_DB.settings.theme = 'custom';
+                }
                 apply(); save(); syncUI();
             });
         });
@@ -181,33 +268,53 @@
                 prefs.serif = fp.serif;
                 prefs.sans = fp.sans;
                 prefs.fontPair = fp.id;
+                if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) {
+                    NOIR_DB.settings.fontSerif = fp.serif;
+                    NOIR_DB.settings.fontSans = fp.sans;
+                }
                 apply(); save(); syncUI();
             });
             fontBox.appendChild(b);
         });
 
-        // Radius slider (persisted to Supabase)
+        // Radius slider (DB-backed, debounced)
         const radiusInp = panel.querySelector('#tc-radius');
         const radiusVal = panel.querySelector('#tc-radius-val');
-        const initialR = Number((typeof NOIR_DB !== 'undefined' && NOIR_DB.settings?.radius) ?? 6);
+        const initialR = Number((typeof NOIR_DB !== 'undefined' && NOIR_DB.settings && NOIR_DB.settings.radius) ?? prefs.radius ?? 6);
         radiusInp.value = initialR;
         radiusVal.textContent = initialR + 'px';
 
-        radiusInp.addEventListener('input', async () => {
+        let radiusSaveTimer = null;
+        radiusInp.addEventListener('input', () => {
             const r = Number(radiusInp.value);
             radiusVal.textContent = r + 'px';
-            if (typeof NOIR_DB !== 'undefined') NOIR_DB.settings.radius = r;
+            prefs.radius = r;
+            if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) NOIR_DB.settings.radius = r;
             applyRadius(r);
-            if (typeof noirSaveAppSettings === 'function') {
-                try { await noirSaveAppSettings({ radius: r }); }
-                catch (err) {
-                    if (typeof showToast === 'function') showToast('Radius saved locally — DB error');
+            writeCache();
+
+            clearTimeout(radiusSaveTimer);
+            radiusSaveTimer = setTimeout(async () => {
+                if (typeof noirSaveAppSettings === 'function') {
+                    try { await noirSaveAppSettings({ radius: r }); }
+                    catch (err) {
+                        console.warn('[theme] radius DB save failed:', err);
+                        if (typeof showToast === 'function') showToast('Radius saved locally — DB error');
+                    }
                 }
-            }
+            }, 300);
         });
 
         panel.querySelector('.tc-reset').addEventListener('click', () => {
             prefs = { ...DEFAULT };
+            if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) {
+                NOIR_DB.settings.theme = 'midnight';
+                NOIR_DB.settings.fontSerif = DEFAULT.serif;
+                NOIR_DB.settings.fontSans = DEFAULT.sans;
+                NOIR_DB.settings.bgColor = DEFAULT.bg;
+                NOIR_DB.settings.textColor = DEFAULT.text;
+                NOIR_DB.settings.accentColor = DEFAULT.accent;
+            }
             apply(); save(); syncUI();
         });
 
@@ -243,34 +350,35 @@
         });
     }
 
-    /* --- Apply from DB whenever settings arrive --- */
-    function applyFromDB() {
-        const s = (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) || {};
-
-        if (s.theme && PRESETS[s.theme]) {
-            prefs = { ...prefs, ...PRESETS[s.theme], preset: s.theme };
-        }
-        apply();
-
-        if (typeof s.radius === 'number') applyRadius(s.radius);
-    }
-
-    // first paint (avoid flash)
-    apply();
-    if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings.radius != null) {
-        applyRadius(NOIR_DB.settings.radius);
-    }
-
-    // listen for Supabase settings
+    /* ---------- Bootstrap ---------- */
     window.addEventListener('noir:settings-ready', applyFromDB);
     window.addEventListener('noir:radius-change', (e) => applyRadius(e.detail));
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => { buildUI(); syncUI(); applyFromDB(); });
-    } else {
-        buildUI(); syncUI(); applyFromDB();
+    // لو DB سبق ووصل (unlikely)، طبّق فورًا
+    if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings && NOIR_DB.settings.theme) {
+        applyFromDB();
     }
 
-    window.noirTheme = { apply, save, applyRadius, get prefs() { return prefs; }, PRESETS, applyFromDB };
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            buildUI();
+            syncUI();
+        });
+    } else {
+        buildUI();
+        syncUI();
+    }
+
+    /* ---------- Public API ---------- */
+    window.noirTheme = {
+        apply,
+        save,
+        applyRadius,
+        applyFromDB,
+        hideLoader,
+        get prefs() { return prefs; },
+        get isFromDB() { return dbLoaded; },
+        PRESETS,
+    };
     window.noirApplyRadius = applyRadius;
 })();

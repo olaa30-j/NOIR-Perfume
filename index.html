@@ -6,25 +6,6 @@
   <meta name="description" content="Discover NOIR Arabian Luxury fragrances: modern oud, amber, musk and timeless scents.">
   <title>NOIR — Arabian Luxury</title>
 
-  <!-- Anti-flash theme + lang -->
-  <script>
-    (function () {
-      try {
-        var p = JSON.parse(localStorage.getItem('noir-theme-prefs') || '{}');
-        var r = document.documentElement;
-        if (p.bg) r.style.setProperty('--bg', p.bg);
-        if (p.text) r.style.setProperty('--text', p.text);
-        if (p.accent) r.style.setProperty('--accent', p.accent);
-        if (p.serif) r.style.setProperty('--font-serif', '"' + p.serif + '"');
-        if (p.sans) r.style.setProperty('--font-sans', '"' + p.sans + '"');
-        if (p.preset) r.setAttribute('data-theme', p.preset);
-        var d = JSON.parse(localStorage.getItem('noir-app-settings') || '{}');
-        if (d.radius != null) r.style.setProperty('--radius', d.radius + 'px');
-        if (d.language) { r.lang = d.language; r.dir = d.language === 'ar' ? 'rtl' : 'ltr'; }
-      } catch (e) {}
-    })();
-  </script>
-
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&family=Inter:wght@400;500;600&family=Libre+Baskerville:wght@400;700&family=Manrope:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
@@ -38,14 +19,19 @@
   <script src="js/i18n.js" defer></script>
   <script src="js/theme.js" defer></script>
   <script src="js/auth.js" defer></script>
-  <script  type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js"></script>
   <script src="js/products.js" defer></script>
   <script src="js/cart.js" defer></script>
 
-  <!-- Layout كـ Web Component -->
+  <!-- Layout as Web Component -->
   <script type="module" src="js/components/index.js"></script>
 </head>
 <body>
+  <div id="noir-loader" class="noir-loader" role="status" aria-live="polite">
+    <div class="noir-loader-spinner"></div>
+    <p class="noir-loader-text">Loading NOIR…</p>
+  </div>
+
   <noir-layout>
     <main>
       <!-- HERO -->
@@ -163,11 +149,24 @@
       <section class="section-wrap" id="bundles-section" hidden>
         <div class="section-heading">
           <div>
-            <p class="eyebrow centered">✦ &nbsp; <span data-i18n="section.bundles">Bundles &amp; offers</span> &nbsp; ✦</p>
-            <h2 data-i18n="section.bundles">Bundles &amp; offers</h2>
+            <p class="eyebrow centered">✦ &nbsp; <span data-i18n="section.bundles">Bundles</span> &nbsp; ✦</p>
+            <h2 data-i18n="section.bundles">Bundles</h2>
+            <p class="section-subtitle">Curated sets — save more when you bundle.</p>
           </div>
         </div>
         <div class="bundle-grid" id="bundles-grid"></div>
+      </section>
+
+      <!-- OFFERS -->
+      <section class="section-wrap" id="offers-section" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow centered">✦ &nbsp; <span data-i18n="section.offers">Special offers</span> &nbsp; ✦</p>
+            <h2 data-i18n="section.offers">Special offers</h2>
+            <p class="section-subtitle">Limited-time deals on selected fragrances.</p>
+          </div>
+        </div>
+        <div class="product-grid" id="offers-grid"></div>
       </section>
 
       <!-- COLLECTION BANNER -->

@@ -2,8 +2,8 @@
    NOIR — Central Store (Supabase ONLY)
    All reads/writes go directly to Supabase.
    No localStorage fallback for products/orders/bundles.
-   site_settings (project name, address, theme, language, radius)
-   are also Supabase-backed — single row id = 1.
+   site_settings (project name, address, theme, language, radius,
+   fonts, colors) are also Supabase-backed — single row id = 1.
    ============================================================ */
 
 const STORE_DEBUG = true;
@@ -29,6 +29,11 @@ let NOIR_DB = {
     theme: 'midnight',
     language: 'en',
     radius: 6,
+    fontSerif: null,
+    fontSans: null,
+    bgColor: null,
+    textColor: null,
+    accentColor: null,
   },
 };
 
@@ -76,6 +81,11 @@ const NOIR_DEFAULT_SETTINGS = {
   theme: 'midnight',
   language: 'en',
   radius: 6,
+  fontSerif: 'Cormorant Garamond',
+  fontSans: 'DM Sans',
+  bgColor: '#07111c',
+  textColor: '#f5ead7',
+  accentColor: '#c89b55',
 };
 
 function noirApplySettingsToState(row) {
@@ -87,6 +97,12 @@ function noirApplySettingsToState(row) {
     theme: row.theme ?? NOIR_DEFAULT_SETTINGS.theme,
     language: row.language ?? NOIR_DEFAULT_SETTINGS.language,
     radius: row.radius ?? NOIR_DEFAULT_SETTINGS.radius,
+    // NEW — theme details
+    fontSerif: row.font_serif ?? null,
+    fontSans: row.font_sans ?? null,
+    bgColor: row.bg_color ?? null,
+    textColor: row.text_color ?? null,
+    accentColor: row.accent_color ?? null,
   };
 }
 
@@ -103,6 +119,11 @@ function noirMigrateLegacySettings() {
       theme: old.theme || NOIR_DEFAULT_SETTINGS.theme,
       language: old.language || NOIR_DEFAULT_SETTINGS.language,
       radius: Number(old.radius) || NOIR_DEFAULT_SETTINGS.radius,
+      font_serif: old.fontSerif || null,
+      font_sans: old.fontSans || null,
+      bg_color: old.bgColor || null,
+      text_color: old.textColor || null,
+      accent_color: old.accentColor || null,
     };
   } catch { return null; }
 }
@@ -135,6 +156,11 @@ async function noirLoadAppSettings() {
   }
 }
 
+/**
+ * Save app settings to Supabase (row id = 1).
+ * Strategy: UPDATE first; if no row, INSERT (without id, DB generates).
+ * This works even if `id` column is `GENERATED ALWAYS`.
+ */
 async function noirSaveAppSettings(partial) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
 
@@ -146,18 +172,44 @@ async function noirSaveAppSettings(partial) {
     theme: NOIR_DB.settings.theme,
     language: NOIR_DB.settings.language,
     radius: Number(NOIR_DB.settings.radius) || 6,
+    // NEW — theme details
+    font_serif: NOIR_DB.settings.fontSerif ?? null,
+    font_sans: NOIR_DB.settings.fontSans ?? null,
+    bg_color: NOIR_DB.settings.bgColor ?? null,
+    text_color: NOIR_DB.settings.textColor ?? null,
+    accent_color: NOIR_DB.settings.accentColor ?? null,
   };
 
-  const { data, error } = await window.db
+  storeLog('Saving settings (update-then-insert)…', row);
+
+  // 1) UPDATE id=1
+  let { data, error } = await window.db
     .from('site_settings')
-    .upsert({ id: 1, ...row }, { onConflict: 'id' })
+    .update(row)
+    .eq('id', 1)
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) {
-    storeErr('Save settings failed:', error);
+    storeErr('Save settings (update) failed:', error);
     throw error;
   }
+
+  // 2) INSERT بدون id لو مفيش صف
+  if (!data) {
+    storeLog('No row id=1 — inserting new row without id');
+    const insertRes = await window.db
+      .from('site_settings')
+      .insert(row)
+      .select()
+      .maybeSingle();
+    if (insertRes.error) {
+      storeErr('Save settings (insert) failed:', insertRes.error);
+      throw insertRes.error;
+    }
+    data = insertRes.data;
+  }
+
   noirApplySettingsToState(data);
   storeLog('Settings saved to Supabase ✓', NOIR_DB.settings);
   window.dispatchEvent(new CustomEvent('noir:settings-ready', { detail: NOIR_DB.settings }));
@@ -232,8 +284,7 @@ async function noirLoadFromSupabase() {
       spent: Number(row.spent) || 0,
     }));
 
-    /* Keep window.NOIR_DB in sync (it's the same object reference,
-       but we re-assign explicitly for safety and for debuggers). */
+    /* Keep window.NOIR_DB in sync */
     window.NOIR_DB = NOIR_DB;
 
     storeLog(`Loaded: ${NOIR_DB.products.length} products, ${NOIR_DB.orders.length} orders, ${NOIR_DB.bundles.length} bundles, ${NOIR_DB.customers.length} customers`);
@@ -464,13 +515,18 @@ window.noirDEFAULT_SETTINGS = NOIR_DEFAULT_SETTINGS;
   const legacy = noirMigrateLegacySettings();
   if (legacy && noirHasSupabase()) {
     try {
-      await window.db.from('site_settings').upsert({ id: 1, ...legacy }, { onConflict: 'id' });
+      // Update first, fallback to insert (no id)
+      const upd = await window.db.from('site_settings').update(legacy).eq('id', 1).select();
+      if (!upd.error && (!upd.data || upd.data.length === 0)) {
+        const ins = await window.db.from('site_settings').insert(legacy).select();
+        if (ins.error) throw ins.error;
+      }
       storeLog('Legacy settings migrated to Supabase ✓');
     } catch (e) { storeWarn('Legacy migration failed:', e); }
   }
 
   const run = async () => {
-    await noirLoadAppSettings();   // first — theme, language, radius
+    await noirLoadAppSettings();   // first — theme, language, radius, fonts, colors
     await noirLoadFromSupabase();  // then — products, orders, bundles
   };
 
