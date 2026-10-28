@@ -3,11 +3,10 @@
    No demo / no localStorage fallback.
    Role & name are read from the `customers` table ONLY.
    user_metadata is used for `name` only (never for role).
-   Includes: sign-in, sign-up, tabs, session guard, header UI.
    ============================================================ */
 
 /* ---------- DEBUG LOGGER ---------- */
-const NOIR_DEBUG = true; // ← غيّرها false في الإنتاج
+const NOIR_DEBUG = true;
 
 function noirLog(...args) {
   if (NOIR_DEBUG) console.log('%c[NOIR AUTH]', 'color:#c89b55;font-weight:bold', ...args);
@@ -30,11 +29,6 @@ function noirHasAuth() {
 }
 
 /* ---------- CUSTOMER PROFILE LOOKUP ---------- */
-/**
- * يقرأ صف المستخدم من جدول customers.
- * ده المصدر الوحيد للـ role.
- * يرجع { role, name } أو null لو مفيش صف.
- */
 async function noirFetchCustomerProfile(userId, email) {
   if (!window.db || !window.db.from) {
     noirWarn('noirFetchCustomerProfile: Supabase client missing .from()');
@@ -70,11 +64,6 @@ async function noirFetchCustomerProfile(userId, email) {
 }
 
 /* ---------- BUILD SESSION ---------- */
-/**
- * الـ role بيتقرأ من customers ONLY.
- * لو الصف مش موجود → 'customer' (آمن افتراضيًا).
- * user_metadata.role مش بيتستخدم أبدًا.
- */
 async function noirBuildSession(user) {
   const email = user.email || '';
   const metaName = user.user_metadata?.name;
@@ -89,7 +78,6 @@ async function noirBuildSession(user) {
     name = profile.name;
     source = 'customers_table';
   } else {
-    // مفيش صف في customers → customer افتراضي (مش بنستخدم user_metadata.role)
     noirWarn('noirBuildSession: no customers row — defaulting to customer (ignoring any metadata role)');
     source = 'defaults_no_row';
   }
@@ -193,10 +181,6 @@ async function noirLogin(email, password) {
 }
 
 /* ---------- SIGN UP ---------- */
-/**
- * ⚠️ لا يرسل role في الـ metadata أبدًا.
- * الـ Trigger في الداتابيز هو اللي يحط 'customer' تلقائيًا.
- */
 async function noirSignUp({ name, email, password, passwordConfirm }) {
   const n = String(name || '').trim();
   const e = String(email || '').trim().toLowerCase();
@@ -205,28 +189,17 @@ async function noirSignUp({ name, email, password, passwordConfirm }) {
 
   noirLog('noirSignUp() called with:', { name: n, email: e, passwordLength: p.length });
 
-  if (!n || !e || !p) {
-    return { ok: false, error: 'Please fill in all fields.' };
-  }
-  if (p.length < 6) {
-    return { ok: false, error: 'Password must be at least 6 characters.' };
-  }
-  if (p !== pc) {
-    return { ok: false, error: 'Passwords do not match.' };
-  }
-  if (!noirHasAuth()) {
-    return { ok: false, error: 'Authentication service is not available.' };
-  }
+  if (!n || !e || !p) return { ok: false, error: 'Please fill in all fields.' };
+  if (p.length < 6) return { ok: false, error: 'Password must be at least 6 characters.' };
+  if (p !== pc)     return { ok: false, error: 'Passwords do not match.' };
+  if (!noirHasAuth()) return { ok: false, error: 'Authentication service is not available.' };
 
   try {
     noirLog('Calling signUp…', { email: e, name: n });
     const { data, error } = await window.db.auth.signUp({
       email: e,
       password: p,
-      options: {
-        // ← role مقصود إنه مش موجود هنا
-        data: { name: n },
-      },
+      options: { data: { name: n } },
     });
 
     noirLog('signUp() response →', {
@@ -240,14 +213,12 @@ async function noirSignUp({ name, email, password, passwordConfirm }) {
       return { ok: false, error: error.message };
     }
 
-    // Auto-confirm مفعّل → session موجود → دخول مباشر
     if (data && data.session) {
       const session = await noirBuildSession(data.session.user);
       noirLog('Sign-up + auto-login →', session);
       return { ok: true, session, redirect: 'account.html' };
     }
 
-    // محتاج تأكيد إيميل
     noirLog('Sign-up succeeded — email confirmation required');
     return {
       ok: true,
@@ -325,7 +296,7 @@ async function noirUpdateHeaderUI() {
   }
 }
 
-/* ---------- LOGIN PAGE HANDLER (sign-in + tabs) ---------- */
+/* ---------- LOGIN PAGE HANDLER ---------- */
 document.addEventListener('DOMContentLoaded', async function () {
   noirLog('DOMContentLoaded — auth.js ready');
 
@@ -506,14 +477,13 @@ window.noirUpdateHeaderUI = noirUpdateHeaderUI;
 window.noirBuildSession = noirBuildSession;
 window.noirFetchCustomerProfile = noirFetchCustomerProfile;
 
-/* ---------- BOOT DIAGNOSTICS ---------- */
+/* ---------- BOOT DIAGNOSTICS (no localStorage) ---------- */
 window.addEventListener('load', async () => {
   noirLog('=== BOOT DIAGNOSTICS ===');
   noirLog('window.db present:', !!window.db);
   noirLog('window.db.auth present:', !!(window.db && window.db.auth));
   noirLog('noirHasAuth():', noirHasAuth());
   noirLog('Current URL:', location.href);
-  noirLog('localStorage NOIR_SESSION:', localStorage.getItem('NOIR_SESSION'));
 
   if (noirHasAuth()) {
     try {

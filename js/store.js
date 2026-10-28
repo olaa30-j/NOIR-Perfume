@@ -1,9 +1,9 @@
 /* ============================================================
    NOIR — Central Store (Supabase ONLY)
    All reads/writes go directly to Supabase.
-   No localStorage fallback for products/orders/bundles.
    site_settings (project name, address, theme, language, radius,
    fonts, colors) are also Supabase-backed — single row id = 1.
+   NO localStorage anywhere. NO legacy migration.
    ============================================================ */
 
 const STORE_DEBUG = true;
@@ -37,10 +37,7 @@ let NOIR_DB = {
   },
 };
 
-/* ---------- EXPOSE TO GLOBAL (CRITICAL) ----------
-   `let` at top-level does NOT create window.NOIR_DB.
-   app.js (and other files) need this on window.
-   We also re-assign window.NOIR_DB whenever NOIR_DB is re-assigned. */
+/* ---------- EXPOSE TO GLOBAL ---------- */
 window.NOIR_DB = NOIR_DB;
 
 /* ---------- SUPABASE DETECTION ---------- */
@@ -71,10 +68,8 @@ function noirComputePrice(product) {
 }
 
 /* ============================================================
-   APP SETTINGS (Supabase-backed, row id = 1)
+   APP SETTINGS
    ============================================================ */
-const NOIR_APP_SETTINGS_KEY = 'noir-app-settings'; // legacy only
-
 const NOIR_DEFAULT_SETTINGS = {
   projectName: 'NOIR Arabian Perfumes',
   projectAddress: 'Riyadh, Saudi Arabia',
@@ -97,35 +92,12 @@ function noirApplySettingsToState(row) {
     theme: row.theme ?? NOIR_DEFAULT_SETTINGS.theme,
     language: row.language ?? NOIR_DEFAULT_SETTINGS.language,
     radius: row.radius ?? NOIR_DEFAULT_SETTINGS.radius,
-    // NEW — theme details
     fontSerif: row.font_serif ?? null,
     fontSans: row.font_sans ?? null,
     bgColor: row.bg_color ?? null,
     textColor: row.text_color ?? null,
     accentColor: row.accent_color ?? null,
   };
-}
-
-/* (optional) migrate old localStorage settings once */
-function noirMigrateLegacySettings() {
-  try {
-    const raw = localStorage.getItem(NOIR_APP_SETTINGS_KEY);
-    if (!raw) return null;
-    const old = JSON.parse(raw);
-    localStorage.removeItem(NOIR_APP_SETTINGS_KEY);
-    return {
-      project_name: old.projectName || NOIR_DEFAULT_SETTINGS.projectName,
-      project_address: old.projectAddress || NOIR_DEFAULT_SETTINGS.projectAddress,
-      theme: old.theme || NOIR_DEFAULT_SETTINGS.theme,
-      language: old.language || NOIR_DEFAULT_SETTINGS.language,
-      radius: Number(old.radius) || NOIR_DEFAULT_SETTINGS.radius,
-      font_serif: old.fontSerif || null,
-      font_sans: old.fontSans || null,
-      bg_color: old.bgColor || null,
-      text_color: old.textColor || null,
-      accent_color: old.accentColor || null,
-    };
-  } catch { return null; }
 }
 
 async function noirLoadAppSettings() {
@@ -143,7 +115,7 @@ async function noirLoadAppSettings() {
     if (error) throw error;
     if (data) {
       noirApplySettingsToState(data);
-      storeLog('Settings loaded from Supabase:', NOIR_DB.settings);
+      storeLog('Settings loaded:', NOIR_DB.settings);
     } else {
       storeWarn('site_settings row id=1 not found — using defaults');
     }
@@ -156,11 +128,6 @@ async function noirLoadAppSettings() {
   }
 }
 
-/**
- * Save app settings to Supabase (row id = 1).
- * Strategy: UPDATE first; if no row, INSERT (without id, DB generates).
- * This works even if `id` column is `GENERATED ALWAYS`.
- */
 async function noirSaveAppSettings(partial) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
 
@@ -172,7 +139,6 @@ async function noirSaveAppSettings(partial) {
     theme: NOIR_DB.settings.theme,
     language: NOIR_DB.settings.language,
     radius: Number(NOIR_DB.settings.radius) || 6,
-    // NEW — theme details
     font_serif: NOIR_DB.settings.fontSerif ?? null,
     font_sans: NOIR_DB.settings.fontSans ?? null,
     bg_color: NOIR_DB.settings.bgColor ?? null,
@@ -180,9 +146,9 @@ async function noirSaveAppSettings(partial) {
     accent_color: NOIR_DB.settings.accentColor ?? null,
   };
 
-  storeLog('Saving settings (update-then-insert)…', row);
+  storeLog('Saving settings…', row);
 
-  // 1) UPDATE id=1
+  // 1) UPDATE
   let { data, error } = await window.db
     .from('site_settings')
     .update(row)
@@ -195,9 +161,8 @@ async function noirSaveAppSettings(partial) {
     throw error;
   }
 
-  // 2) INSERT بدون id لو مفيش صف
+  // 2) INSERT لو مفيش صف
   if (!data) {
-    storeLog('No row id=1 — inserting new row without id');
     const insertRes = await window.db
       .from('site_settings')
       .insert(row)
@@ -211,13 +176,13 @@ async function noirSaveAppSettings(partial) {
   }
 
   noirApplySettingsToState(data);
-  storeLog('Settings saved to Supabase ✓', NOIR_DB.settings);
+  storeLog('Settings saved ✓', NOIR_DB.settings);
   window.dispatchEvent(new CustomEvent('noir:settings-ready', { detail: NOIR_DB.settings }));
   return data;
 }
 
 /* ============================================================
-   LOAD ALL FROM SUPABASE
+   LOAD ALL FROM SUPABASE — كل جدول optional
    ============================================================ */
 async function noirLoadFromSupabase() {
   if (!noirHasSupabase()) {
@@ -238,11 +203,12 @@ async function noirLoadFromSupabase() {
       window.db.from('customers').select('*').order('name', { ascending: true }),
     ]);
 
-    if (productsRes.error) throw productsRes.error;
-    if (bundlesRes.error) throw bundlesRes.error;
-    if (ordersRes.error) throw ordersRes.error;
-    const customers = customersRes.error ? [] : (customersRes.data || []);
+    if (productsRes.error) storeErr('products load failed:', productsRes.error);
+    if (bundlesRes.error)  storeWarn('bundles load failed (non-fatal):', bundlesRes.error.message || bundlesRes.error);
+    if (ordersRes.error)   storeWarn('orders load failed (non-fatal):', ordersRes.error.message || ordersRes.error);
+    if (customersRes.error) storeWarn('customers load failed (non-fatal):', customersRes.error.message || customersRes.error);
 
+    /* ---------- products ---------- */
     NOIR_DB.products = (productsRes.data || []).map(row => ({
       id: row.id,
       name: row.name,
@@ -257,6 +223,7 @@ async function noirLoadFromSupabase() {
       offer: row.offer || null,
     }));
 
+    /* ---------- bundles ---------- */
     NOIR_DB.bundles = (bundlesRes.data || []).map(row => ({
       id: row.id,
       name: row.name,
@@ -267,24 +234,30 @@ async function noirLoadFromSupabase() {
       active: row.active !== false,
     }));
 
+    /* ---------- orders ---------- */
     NOIR_DB.orders = (ordersRes.data || []).map(row => ({
       id: row.id,
       customer: row.customer_name,
       email: row.customer_email,
+      customerId: row.customer_id || null,
       date: row.created_at ? row.created_at.slice(0, 10) : '',
       total: Number(row.total),
       status: row.status,
       items: row.items || [],
     }));
 
-    NOIR_DB.customers = customers.map(row => ({
+    /* ---------- customers ---------- */
+    NOIR_DB.customers = (customersRes.data || []).map(row => ({
+      id: row.id,
+      userId: row.user_id || null,
+      cartId: row.cart_id || null,
+      ordersList: Array.isArray(row.orders) ? row.orders : [],
       name: row.name,
       email: row.email,
-      orders: row.orders || 0,
+      orders: Array.isArray(row.orders) ? row.orders.length : (Number(row.orders) || 0),
       spent: Number(row.spent) || 0,
     }));
 
-    /* Keep window.NOIR_DB in sync */
     window.NOIR_DB = NOIR_DB;
 
     storeLog(`Loaded: ${NOIR_DB.products.length} products, ${NOIR_DB.orders.length} orders, ${NOIR_DB.bundles.length} bundles, ${NOIR_DB.customers.length} customers`);
@@ -303,39 +276,15 @@ async function noirLoadFromSupabase() {
 }
 
 /* ============================================================
-   REFRESH WITHOUT RELOAD
+   REFRESH — data only; rendering handled by app.js via noir:data-ready
    ============================================================ */
 async function noirRefreshStoreData() {
-  storeLog('noirRefreshStoreData() start — no page reload');
-
+  storeLog('noirRefreshStoreData() start');
   const ok = await noirLoadFromSupabase();
-
   if (!ok) {
-    storeWarn('Refresh failed — data may be stale');
+    storeWarn('Refresh failed');
     return false;
   }
-
-  try {
-    if (typeof renderProducts === 'function' && document.getElementById('product-grid')) {
-      renderProducts();
-      storeLog('Re-rendered products grid');
-    }
-    if (typeof renderBestSellers === 'function' && document.getElementById('bestsellers-grid')) {
-      renderBestSellers();
-      storeLog('Re-rendered best sellers');
-    }
-    if (typeof renderBundles === 'function' && document.getElementById('bundles-grid')) {
-      renderBundles();
-      storeLog('Re-rendered bundles');
-    }
-    if (typeof updateCartUI === 'function') {
-      updateCartUI();
-      storeLog('Updated cart UI');
-    }
-  } catch (e) {
-    storeWarn('Re-render failed:', e);
-  }
-
   storeLog('noirRefreshStoreData() done ✓');
   return true;
 }
@@ -361,41 +310,20 @@ async function noirSaveProductToDB(product) {
 
   if (product.id) {
     row.id = product.id;
-    storeLog('Upserting product (update):', row.name, '| id:', row.id);
-    const { data, error } = await window.db
-      .from('products')
-      .upsert(row, { onConflict: 'id' })
-      .select();
-    if (error) {
-      storeErr('Product update failed:', error);
-      throw error;
-    }
-    storeLog('Product updated ✓', data && data[0] ? data[0].id : row.id);
+    const { data, error } = await window.db.from('products').upsert(row, { onConflict: 'id' }).select();
+    if (error) throw error;
     return data && data[0] ? data[0] : row;
   } else {
-    storeLog('Inserting product (new):', row.name);
-    const { data, error } = await window.db
-      .from('products')
-      .insert(row)
-      .select();
-    if (error) {
-      storeErr('Product insert failed:', error);
-      throw error;
-    }
-    storeLog('Product inserted ✓', data && data[0] ? data[0].id : 'no id returned');
+    const { data, error } = await window.db.from('products').insert(row).select();
+    if (error) throw error;
     return data && data[0] ? data[0] : row;
   }
 }
 
 async function noirDeleteProductFromDB(id) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
-  storeLog('Deleting product:', id);
   const { error } = await window.db.from('products').delete().eq('id', Number(id));
-  if (error) {
-    storeErr('Product delete failed:', error);
-    throw error;
-  }
-  storeLog('Product deleted ✓', id);
+  if (error) throw error;
   return true;
 }
 
@@ -416,41 +344,20 @@ async function noirSaveBundleToDB(bundle) {
 
   if (bundle.id) {
     row.id = bundle.id;
-    storeLog('Upserting bundle (update):', row.name, '| id:', row.id);
-    const { data, error } = await window.db
-      .from('bundles')
-      .upsert(row, { onConflict: 'id' })
-      .select();
-    if (error) {
-      storeErr('Bundle update failed:', error);
-      throw error;
-    }
-    storeLog('Bundle updated ✓', data && data[0] ? data[0].id : row.id);
+    const { data, error } = await window.db.from('bundles').upsert(row, { onConflict: 'id' }).select();
+    if (error) throw error;
     return data && data[0] ? data[0] : row;
   } else {
-    storeLog('Inserting bundle (new):', row.name);
-    const { data, error } = await window.db
-      .from('bundles')
-      .insert(row)
-      .select();
-    if (error) {
-      storeErr('Bundle insert failed:', error);
-      throw error;
-    }
-    storeLog('Bundle inserted ✓', data && data[0] ? data[0].id : 'no id returned');
+    const { data, error } = await window.db.from('bundles').insert(row).select();
+    if (error) throw error;
     return data && data[0] ? data[0] : row;
   }
 }
 
 async function noirDeleteBundleFromDB(id) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
-  storeLog('Deleting bundle:', id);
   const { error } = await window.db.from('bundles').delete().eq('id', Number(id));
-  if (error) {
-    storeErr('Bundle delete failed:', error);
-    throw error;
-  }
-  storeLog('Bundle deleted ✓', id);
+  if (error) throw error;
   return true;
 }
 
@@ -459,6 +366,14 @@ async function noirDeleteBundleFromDB(id) {
    ============================================================ */
 async function noirSaveOrderToDB(order) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
+
+  let customerId = order.customerId || null;
+  if (!customerId && window.db?.auth) {
+    try {
+      const { data } = await window.db.auth.getUser();
+      customerId = data?.user?.id || null;
+    } catch (e) { /* ignore */ }
+  }
 
   const row = {
     id: order.id,
@@ -469,9 +384,11 @@ async function noirSaveOrderToDB(order) {
     items: order.items || [],
   };
 
-  storeLog('Saving order to Supabase:', row.id, '| total:', row.total);
+  if (customerId) row.customer_id = customerId;
 
-  const { data, error } = await window.db.from('orders').upsert(row).select();
+  storeLog('Saving order:', row.id, '| total:', row.total);
+
+  const { data, error } = await window.db.from('orders').upsert(row, { onConflict: 'id' }).select();
   if (error) {
     storeErr('Order save failed:', error);
     throw error;
@@ -482,14 +399,59 @@ async function noirSaveOrderToDB(order) {
 
 async function noirUpdateOrderStatusInDB(id, status) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
-  storeLog('Updating order status:', id, '→', status);
   const { error } = await window.db.from('orders').update({ status }).eq('id', id);
+  if (error) throw error;
+  return true;
+}
+
+/* ============================================================
+   WRITE: CUSTOMER
+   ============================================================ */
+async function noirSaveCustomerToDB(customer) {
+  if (!noirHasSupabase()) throw new Error('Supabase not configured');
+
+  let userId = customer.userId || null;
+  if (!userId && window.db?.auth) {
+    const { data } = await window.db.auth.getUser();
+    userId = data?.user?.id || null;
+  }
+  if (!userId) throw new Error('No authenticated user');
+
+  const row = {
+    user_id: userId,
+    name: customer.name,
+    email: customer.email,
+    spent: Number(customer.spent) || 0,
+  };
+
+  if (Array.isArray(customer.orders)) row.orders = customer.orders;
+  if (customer.cartId != null) row.cart_id = customer.cartId;
+
+  storeLog('Saving customer:', userId, '| orders:', row.orders?.length || 0);
+
+  let { data, error } = await window.db
+    .from('customers')
+    .update(row)
+    .eq('user_id', userId)
+    .select()
+    .maybeSingle();
+
   if (error) {
-    storeErr('Order status update failed:', error);
+    storeErr('Customer update failed:', error);
     throw error;
   }
-  storeLog('Order status updated ✓');
-  return true;
+
+  if (!data) {
+    const ins = await window.db.from('customers').insert(row).select().maybeSingle();
+    if (ins.error) {
+      storeErr('Customer insert failed:', ins.error);
+      throw ins.error;
+    }
+    data = ins.data;
+  }
+
+  storeLog('Customer saved ✓', data);
+  return data;
 }
 
 /* ---------- EXPORTS ---------- */
@@ -507,27 +469,14 @@ window.noirSaveOrderToDB = noirSaveOrderToDB;
 window.noirUpdateOrderStatusInDB = noirUpdateOrderStatusInDB;
 window.noirLoadAppSettings = noirLoadAppSettings;
 window.noirSaveAppSettings = noirSaveAppSettings;
+window.noirSaveCustomerToDB = noirSaveCustomerToDB;
 window.noirDEFAULT_SETTINGS = NOIR_DEFAULT_SETTINGS;
 
-/* ---------- AUTO-LOAD ---------- */
+/* ---------- AUTO-LOAD (no localStorage, no migration) ---------- */
 (async function autoLoad() {
-  // (optional) migrate old localStorage settings
-  const legacy = noirMigrateLegacySettings();
-  if (legacy && noirHasSupabase()) {
-    try {
-      // Update first, fallback to insert (no id)
-      const upd = await window.db.from('site_settings').update(legacy).eq('id', 1).select();
-      if (!upd.error && (!upd.data || upd.data.length === 0)) {
-        const ins = await window.db.from('site_settings').insert(legacy).select();
-        if (ins.error) throw ins.error;
-      }
-      storeLog('Legacy settings migrated to Supabase ✓');
-    } catch (e) { storeWarn('Legacy migration failed:', e); }
-  }
-
   const run = async () => {
-    await noirLoadAppSettings();   // first — theme, language, radius, fonts, colors
-    await noirLoadFromSupabase();  // then — products, orders, bundles
+    await noirLoadAppSettings();
+    await noirLoadFromSupabase();
   };
 
   if (document.readyState === 'loading') {

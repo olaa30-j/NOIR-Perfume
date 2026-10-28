@@ -1,11 +1,14 @@
 /* ============================================================
-   NOIR — Cart + Product modal (Supabase-only for orders)
-   Cart items stay in localStorage (per-user).
-   Orders are saved to Supabase.
-   After checkout: NO reload — UI refreshes in place.
+   NOIR — Cart (Supabase ONLY, one row per user)
+   Schema:
+     carts { user_id uuid PK, items jsonb[], created_at, updated_at }
+   Items: [{ type:'product'|'bundle', id:number, qty:number }, ...]
+   - No localStorage
+   - Guests: in-memory only
+   - Logged-in: single Supabase row per user (created by DB trigger)
+   - Emits 'noir:cart-updated' on every change
    ============================================================ */
 
-const NOIR_CART_KEY = 'noir-cart';
 const NOIR_CART_DEBUG = true;
 
 function cartLog(...args) {
@@ -19,7 +22,7 @@ function cartErr(...args) {
 }
 
 /* ---------- HELPERS ---------- */
-function cart$ (sel) { try { return document.querySelector(sel); } catch (e) { return null; } }
+function cart$(sel) { try { return document.querySelector(sel); } catch (e) { return null; } }
 function cartEsc(str) {
   return String(str == null ? '' : str)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -29,143 +32,287 @@ function cartMoney(n) {
   return '$' + (Math.round(Number(n) * 100) / 100).toFixed(2);
 }
 function cartGetProduct(id) {
-  if (typeof noirGetProduct === 'function') return noirGetProduct(id);
+  if (typeof window.noirGetProduct === 'function') return window.noirGetProduct(id);
+  if (typeof window.NOIR_DB !== 'undefined' && window.NOIR_DB.products) {
+    return window.NOIR_DB.products.find(p => p.id === Number(id));
+  }
+  return null;
+}
+function cartGetBundle(id) {
+  if (typeof window.noirGetBundle === 'function') return window.noirGetBundle(id);
+  if (typeof window.NOIR_DB !== 'undefined' && window.NOIR_DB.bundles) {
+    return window.NOIR_DB.bundles.find(b => b.id === Number(id));
+  }
   return null;
 }
 function cartComputePrice(p) {
   if (!p) return 0;
-  if (typeof noirComputePrice === 'function') return noirComputePrice(p);
-  return p.price;
+  if (typeof window.noirComputePrice === 'function') return window.noirComputePrice(p);
+  return Number(p.price) || 0;
 }
 
-/* ---------- CART STATE ---------- */
-function loadCart() {
+/* ---------- STATE ---------- */
+let NOIR_CART = [];            // [{ type:'product'|'bundle', id, qty }]
+let CURRENT_USER_ID = null;
+let READY = false;
+
+function emitCartUpdate() {
   try {
-    const raw = localStorage.getItem(NOIR_CART_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      cartLog('Loaded cart from localStorage:', parsed.length, 'items');
-      return parsed;
+    window.dispatchEvent(new CustomEvent('noir:cart-updated', {
+      detail: { items: getCartItems(), count: cartCount(), subtotal: cartSubtotal() },
+    }));
+  } catch (e) { cartWarn('emit failed:', e); }
+}
+
+/* ---------- SUPABASE ---------- */
+function hasSB() {
+  return window.db && typeof window.db.from === 'function';
+}
+
+/** noirGetSession() returns { userId, email, role, name } */
+async function sbGetUser() {
+  try {
+    if (typeof window.noirGetSession === 'function') {
+      const s = await window.noirGetSession();
+      if (s && s.userId) return { id: s.userId, email: s.email || null };
+      if (s && s.email)  return { id: null,    email: s.email };
     }
-  } catch (e) { cartWarn('loadCart failed:', e); }
-  return [];
-}
-function saveCart(cart) {
-  try { localStorage.setItem(NOIR_CART_KEY, JSON.stringify(cart)); }
-  catch (e) { cartWarn('saveCart failed:', e); }
+    if (window.db && window.db.auth) {
+      const { data } = await window.db.auth.getUser();
+      if (data && data.user) return { id: data.user.id, email: data.user.email };
+    }
+  } catch (e) { /* ignore */ }
+  return { id: null, email: null };
 }
 
-let NOIR_CART = loadCart();
+/** Load items array from the single carts row. */
+async function sbLoad(userId) {
+  if (!hasSB() || !userId) return [];
+  const { data, error } = await window.db
+    .from('carts')
+    .select('items')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) { cartErr('sbLoad failed:', error); return []; }
+  const raw = data && Array.isArray(data.items) ? data.items : [];
+  return raw
+    .filter(it => it && (it.type === 'product' || it.type === 'bundle') && Number.isFinite(Number(it.id)))
+    .map(it => ({ type: it.type, id: Number(it.id), qty: Math.max(1, Number(it.qty) || 1) }));
+}
 
-/* ---------- ADD ---------- */
-function addToCart(productId, qty) {
+/**
+ * Save items. Uses update-first (row exists via DB trigger),
+ * insert fallback only for edge cases.
+ */
+async function sbSave(userId, items) {
+  if (!hasSB() || !userId) return;
+
+  const clean = (items || [])
+    .filter(it => it && (it.type === 'product' || it.type === 'bundle') && Number.isFinite(Number(it.id)))
+    .map(it => ({ type: it.type, id: Number(it.id), qty: Math.max(1, Number(it.qty) || 1) }));
+
+  // 1) update — expected path (trigger created the row)
+  const upd = await window.db
+    .from('carts')
+    .update({ items: clean, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .select('user_id')
+    .maybeSingle();
+
+  if (upd.error) { cartErr('sbSave update failed:', upd.error); return; }
+  if (upd.data) return;
+
+  // 2) insert fallback
+  cartWarn('sbSave: row missing, inserting (trigger may have missed this user)');
+  const ins = await window.db
+    .from('carts')
+    .insert({ user_id: userId, items: clean })
+    .select('user_id')
+    .maybeSingle();
+  if (ins.error) cartErr('sbSave insert failed:', ins.error);
+}
+
+/** Clear contents but keep the row (trigger owns lifecycle). */
+async function sbClear(userId) {
+  if (!hasSB() || !userId) return;
+  const { error } = await window.db
+    .from('carts')
+    .update({ items: [], updated_at: new Date().toISOString() })
+    .eq('user_id', userId);
+  if (error) cartErr('sbClear failed:', error);
+}
+
+/* ---------- SYNC ---------- */
+async function syncForUser() {
+  const user = await sbGetUser();
+  CURRENT_USER_ID = user.id;
+  cartLog('syncForUser: userId =', user.id);
+
+  if (user.id && hasSB()) {
+    const remote = await sbLoad(user.id);
+
+    if (NOIR_CART.length) {
+      // merge guest items into user's cart
+      const merged = mergeItems(remote, NOIR_CART);
+      NOIR_CART = merged;
+      await sbSave(user.id, NOIR_CART);
+      cartLog('merged guest cart → items:', NOIR_CART.length);
+    } else {
+      NOIR_CART = remote;
+      cartLog('loaded cart → items:', NOIR_CART.length);
+    }
+  } else {
+    cartLog('guest mode — in-memory only');
+  }
+  emitCartUpdate();
+  READY = true;
+}
+
+function mergeItems(base, add) {
+  const out = base.map(it => ({ ...it }));
+  for (const it of add) {
+    const found = out.find(x => x.type === it.type && x.id === it.id);
+    if (found) found.qty += it.qty;
+    else out.push({ ...it });
+  }
+  return out;
+}
+
+/** Persist full state. */
+async function persist() {
+  if (CURRENT_USER_ID) await sbSave(CURRENT_USER_ID, NOIR_CART);
+}
+
+/* ---------- CORE: ADD PRODUCT ---------- */
+async function addProductToCart(productId, qty) {
   const id = Number(productId);
   const quantity = Math.max(1, Number(qty) || 1);
   const product = cartGetProduct(id);
-  if (!product) { cartWarn('addToCart: product not found:', id); return; }
-  const existing = NOIR_CART.find(item => item.id === id);
-  if (existing) existing.qty += quantity;
-  else NOIR_CART.push({ id, qty: quantity });
-  saveCart(NOIR_CART);
-  updateCartUI();
-  cartLog('Added to cart:', product.name, '| total items:', cartCount());
-  if (typeof showToast === 'function') showToast(product.name + ' added to bag');
-}
-window.addToCart = addToCart;
+  if (!product) { cartWarn('addProductToCart: not found:', id); return; }
 
-/* ---------- REMOVE / QTY ---------- */
-function removeFromCart(productId) {
-  const id = Number(productId);
-  NOIR_CART = NOIR_CART.filter(item => item.id !== id);
-  saveCart(NOIR_CART);
-  updateCartUI();
-  cartLog('Removed from cart:', id);
+  const existing = NOIR_CART.find(it => it.type === 'product' && it.id === id);
+  if (existing) existing.qty += quantity;
+  else NOIR_CART.push({ type: 'product', id, qty: quantity });
+
+  emitCartUpdate();
+  cartLog('Added product:', product.name, '| lines:', NOIR_CART.length);
+  if (typeof showToast === 'function') showToast(product.name + ' added to bag');
+
+  await persist();
 }
-function updateQty(productId, delta) {
-  const id = Number(productId);
-  const item = NOIR_CART.find(i => i.id === id);
-  if (!item) return;
-  item.qty += delta;
-  if (item.qty <= 0) NOIR_CART = NOIR_CART.filter(i => i.id !== id);
-  saveCart(NOIR_CART);
-  updateCartUI();
+
+/* ---------- CORE: ADD BUNDLE ---------- */
+async function addBundleToCart(bundleId, qty) {
+  const id = Number(bundleId);
+  const quantity = Math.max(1, Number(qty) || 1);
+  const bundle = cartGetBundle(id);
+  if (!bundle) { cartWarn('addBundleToCart: not found:', id); return; }
+
+  const existing = NOIR_CART.find(it => it.type === 'bundle' && it.id === id);
+  if (existing) existing.qty += quantity;
+  else NOIR_CART.push({ type: 'bundle', id, qty: quantity });
+
+  emitCartUpdate();
+  cartLog('Added bundle:', bundle.name, '| lines:', NOIR_CART.length);
+  if (typeof showToast === 'function') showToast(bundle.name + ' added to bag');
+
+  await persist();
 }
-window.removeFromCart = removeFromCart;
-window.updateQty = updateQty;
+
+/* ---------- CORE: REMOVE ---------- */
+async function removeLine(type, id) {
+  NOIR_CART = NOIR_CART.filter(it => !(it.type === String(type) && it.id === Number(id)));
+  emitCartUpdate();
+  await persist();
+}
+
+/* ---------- CORE: QTY ---------- */
+async function updateLineQty(type, id, delta) {
+  const t = String(type);
+  const n = Number(id);
+  const line = NOIR_CART.find(it => it.type === t && it.id === n);
+  if (!line) return;
+
+  line.qty += Number(delta) || 0;
+  if (line.qty <= 0) {
+    NOIR_CART = NOIR_CART.filter(it => !(it.type === t && it.id === n));
+  }
+  emitCartUpdate();
+  await persist();
+}
+
+async function setLineQty(type, id, qty) {
+  const t = String(type);
+  const n = Number(id);
+  const q = Math.max(1, Number(qty) || 1);
+  const line = NOIR_CART.find(it => it.type === t && it.id === n);
+  if (!line) return;
+  line.qty = q;
+  emitCartUpdate();
+  await persist();
+}
+
+async function clearCart() {
+  NOIR_CART = [];
+  emitCartUpdate();
+  if (CURRENT_USER_ID) await sbClear(CURRENT_USER_ID);
+}
 
 /* ---------- TOTALS ---------- */
 function cartSubtotal() {
-  return NOIR_CART.reduce((sum, item) => {
-    const p = cartGetProduct(item.id);
-    if (!p) return sum;
-    return sum + cartComputePrice(p) * item.qty;
+  return NOIR_CART.reduce((sum, line) => {
+    if (line.type === 'product') {
+      const p = cartGetProduct(line.id);
+      return p ? sum + cartComputePrice(p) * line.qty : sum;
+    }
+    if (line.type === 'bundle') {
+      const b = cartGetBundle(line.id);
+      return b ? sum + (Number(b.price) || 0) * line.qty : sum;
+    }
+    return sum;
   }, 0);
 }
+
 function cartCount() {
-  return NOIR_CART.reduce((sum, item) => sum + item.qty, 0);
+  return NOIR_CART.reduce((sum, line) => sum + line.qty, 0);
 }
-window.cartSubtotal = cartSubtotal;
-window.cartCount = cartCount;
 
-/* ---------- UI ---------- */
-function updateCartUI() {
-  const badge = cart$('#cart-count');
-  if (badge) badge.textContent = String(cartCount());
-
-  const list = cart$('#cart-items');
-  if (list) {
-    if (!NOIR_CART.length) {
-      list.innerHTML = '<div class="cart-empty">Your bag is empty.</div>';
-    } else {
-      list.innerHTML = NOIR_CART.map(item => {
-        const p = cartGetProduct(item.id);
-        if (!p) return '';
-        const unitPrice = cartComputePrice(p);
-        return '<div class="cart-row">' +
-          '<div class="cart-thumb"><div class="product-bottle ' + (p.bottle || '') + '"></div></div>' +
-          '<div>' +
-            '<h3>' + cartEsc(p.name) + '</h3>' +
-            '<p>' + cartEsc(p.subtitle || '') + '</p>' +
-            '<div class="quantity-controls">' +
-              '<button data-cart-minus="' + p.id + '" aria-label="Decrease">−</button>' +
-              '<span>' + item.qty + '</span>' +
-              '<button data-cart-plus="' + p.id + '" aria-label="Increase">+</button>' +
-            '</div>' +
-            '<button class="remove-item" data-cart-remove="' + p.id + '">Remove</button>' +
-          '</div>' +
-          '<div class="cart-row-price">' + cartMoney(unitPrice * item.qty) + '</div>' +
-        '</div>';
-      }).join('');
-    }
-  }
-
-  const sub = cart$('#cart-subtotal');
-  if (sub) sub.textContent = cartMoney(cartSubtotal());
-
-  const coTotal = cart$('#checkout-total');
-  if (coTotal) coTotal.textContent = cartMoney(cartSubtotal());
-
-  cartLog('updateCartUI →', { items: NOIR_CART.length, total: cartSubtotal() });
+/* ---------- GET ITEMS ---------- */
+function getCartItems() {
+  return NOIR_CART
+    .map(line => {
+      if (line.type === 'product') {
+        const product = cartGetProduct(line.id);
+        return product ? { type: 'product', id: line.id, qty: line.qty, product } : null;
+      }
+      if (line.type === 'bundle') {
+        const bundle = cartGetBundle(line.id);
+        return bundle ? { type: 'bundle', id: line.id, qty: line.qty, bundle } : null;
+      }
+      return null;
+    })
+    .filter(Boolean);
 }
 
 /* ---------- DRAWER ---------- */
 function openCartDrawer() {
+  const siteCart = document.querySelector('site-cart');
+  if (siteCart && typeof siteCart.open === 'function') { siteCart.open(); return; }
   const drawer = cart$('#cart-drawer');
   const backdrop = cart$('#drawer-backdrop');
   if (drawer) { drawer.classList.add('open'); drawer.setAttribute('aria-hidden', 'false'); }
   if (backdrop) backdrop.classList.remove('hidden');
   document.body.classList.add('lock-scroll');
-  cartLog('Cart drawer opened');
 }
 function closeCartDrawer() {
+  const siteCart = document.querySelector('site-cart');
+  if (siteCart && typeof siteCart.close === 'function') { siteCart.close(); return; }
   const drawer = cart$('#cart-drawer');
   const backdrop = cart$('#drawer-backdrop');
   if (drawer) { drawer.classList.remove('open'); drawer.setAttribute('aria-hidden', 'true'); }
   if (backdrop) backdrop.classList.add('hidden');
   document.body.classList.remove('lock-scroll');
 }
-window.openCartDrawer = openCartDrawer;
-window.closeCartDrawer = closeCartDrawer;
 
 /* ---------- PRODUCT MODAL ---------- */
 function openProductModal(productId) {
@@ -197,55 +344,130 @@ function openProductModal(productId) {
   if (typeof modal.showModal === 'function') modal.showModal();
   else modal.setAttribute('open', '');
 }
+
+/* ============================================================
+   CUSTOMER SYNC (after checkout)
+   Note: customers.cart_id no longer exists — we use user_id only.
+   ============================================================ */
+async function syncCustomerAfterOrder(order) {
+  if (!CURRENT_USER_ID || !hasSB()) return;
+
+  try {
+    const user = await sbGetUser();
+
+    const { data: existing, error: getErr } = await window.db
+      .from('customers')
+      .select('*')
+      .eq('user_id', CURRENT_USER_ID)
+      .maybeSingle();
+
+    if (getErr) cartWarn('customer get failed:', getErr);
+
+    const prevOrders = Array.isArray(existing?.orders) ? existing.orders : [];
+    const prevSpent = Number(existing?.spent) || 0;
+
+    const row = {
+      user_id: CURRENT_USER_ID,
+      name: order.customer,
+      email: order.email || user.email,
+      orders: [...prevOrders, order.id],
+      spent: prevSpent + Number(order.total || 0),
+    };
+
+    if (existing) {
+      const { error } = await window.db
+        .from('customers')
+        .update(row)
+        .eq('user_id', CURRENT_USER_ID);
+      if (error) throw error;
+      cartLog('Customer updated ✓ (orders:', row.orders.length, ')');
+    } else {
+      const { error } = await window.db.from('customers').insert(row);
+      if (error) throw error;
+      cartLog('Customer created ✓');
+    }
+  } catch (e) {
+    cartWarn('syncCustomerAfterOrder failed:', e);
+  }
+}
+
+/* ============================================================
+   EXPOSE API
+   ============================================================ */
+window.addToCart        = addProductToCart;   // product alias
+window.addProductToCart = addProductToCart;
+window.addBundleToCart  = addBundleToCart;
+window.removeLine       = removeLine;
+window.updateLineQty    = updateLineQty;
+window.setLineQty       = setLineQty;
+window.clearCart        = clearCart;
+window.getCartItems     = getCartItems;
+window.getCartCount     = cartCount;
+window.getCartSubtotal  = cartSubtotal;
+window.cartSubtotal     = cartSubtotal;
+window.cartCount        = cartCount;
+window.openCartDrawer   = openCartDrawer;
+window.closeCartDrawer  = closeCartDrawer;
 window.openProductModal = openProductModal;
 
-/* ---------- DELEGATED CLICKS ---------- */
-document.addEventListener('click', function (e) {
+Object.defineProperty(window, 'noirCart', {
+  get() { return { items: getCartItems() }; },
+  configurable: true,
+});
+
+/* ============================================================
+   DELEGATED CLICKS
+   data-cart-minus / data-cart-plus / data-cart-remove
+   accept either "product:12" / "bundle:3" or bare "12" (product).
+   ============================================================ */
+function parseLineKey(key) {
+  const s = String(key || '');
+  if (s.indexOf(':') === -1) return { type: 'product', id: Number(s) };
+  const [type, id] = s.split(':');
+  return { type: type === 'bundle' ? 'bundle' : 'product', id: Number(id) };
+}
+
+document.addEventListener('click', async function (e) {
   try {
-    if (e.target.closest('#cart-open') || e.target.closest('.cart-trigger')) { e.preventDefault(); openCartDrawer(); return; }
+    const addBtn = e.target.closest('[data-add-to-cart]');
+    if (addBtn) {
+      await addProductToCart(Number(addBtn.dataset.addToCart), 1);
+      return;
+    }
+
+    const bundleBtn = e.target.closest('[data-add-bundle]');
+    if (bundleBtn) {
+      await addBundleToCart(Number(bundleBtn.dataset.addBundle), 1);
+      return;
+    }
+
+    const quickBtn = e.target.closest('[data-quick-view]');
+    if (quickBtn) { openProductModal(Number(quickBtn.dataset.quickView)); return; }
+
+    if (e.target.closest('#cart-open') || e.target.closest('.cart-trigger')) {
+      e.preventDefault(); openCartDrawer(); return;
+    }
     if (e.target.closest('#cart-close')) { e.preventDefault(); closeCartDrawer(); return; }
     if (e.target.closest('#drawer-backdrop')) { closeCartDrawer(); return; }
 
     const minus = e.target.closest('[data-cart-minus]');
-    if (minus) { updateQty(minus.dataset.cartMinus, -1); return; }
+    if (minus) { const k = parseLineKey(minus.dataset.cartMinus); await updateLineQty(k.type, k.id, -1); return; }
+
     const plus = e.target.closest('[data-cart-plus]');
-    if (plus) { updateQty(plus.dataset.cartPlus, +1); return; }
+    if (plus) { const k = parseLineKey(plus.dataset.cartPlus); await updateLineQty(k.type, k.id, +1); return; }
+
     const rem = e.target.closest('[data-cart-remove]');
-    if (rem) { removeFromCart(rem.dataset.cartRemove); return; }
+    if (rem) { const k = parseLineKey(rem.dataset.cartRemove); await removeLine(k.type, k.id); return; }
 
-    if (e.target.closest('#checkout-button')) {
-      e.preventDefault();
-      if (!NOIR_CART.length) { if (typeof showToast === 'function') showToast('Your bag is empty'); return; }
-      closeCartDrawer();
-      const co = cart$('#checkout-modal');
-      if (co && typeof co.showModal === 'function') {
-        const total = cart$('#checkout-total');
-        if (total) total.textContent = cartMoney(cartSubtotal());
-        co.showModal();
-      }
-      return;
-    }
-
-    const closeBtn = e.target.closest('[data-close]');
-    if (closeBtn) {
-      const id = closeBtn.dataset.close;
-      const m = document.getElementById(id);
-      if (m && typeof m.close === 'function') m.close();
-      return;
-    }
-  } catch (err) {
-    cartErr('click failed:', err);
-  }
+  } catch (err) { cartErr('click failed:', err); }
 });
 
 /* ============================================================
-   CHECKOUT → Supabase  (NO RELOAD)
+   CHECKOUT → Supabase
    ============================================================ */
 document.addEventListener('submit', async function (e) {
   if (e.target.id !== 'checkout-form') return;
   e.preventDefault();
-
-  cartLog('Checkout submit fired');
 
   const data = new FormData(e.target);
   const name = data.get('name');
@@ -253,8 +475,12 @@ document.addEventListener('submit', async function (e) {
   const address = data.get('address');
 
   if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
-    cartErr('Supabase not configured');
-    if (typeof showToast === 'function') showToast('❌ Cannot place order — database not connected.');
+    if (typeof showToast === 'function') showToast('❌ Cannot place order — DB not connected.');
+    return;
+  }
+
+  if (!NOIR_CART.length) {
+    if (typeof showToast === 'function') showToast('Your bag is empty');
     return;
   }
 
@@ -263,11 +489,29 @@ document.addEventListener('submit', async function (e) {
     customer: String(name || 'Guest'),
     email: String(email || ''),
     address: String(address || ''),
+    customerId: CURRENT_USER_ID,
     total: cartSubtotal(),
     status: 'Processing',
-    items: NOIR_CART.map(item => {
-      const p = cartGetProduct(item.id);
-      return { productId: item.id, qty: item.qty, price: p ? cartComputePrice(p) : 0 };
+    items: NOIR_CART.map(line => {
+      if (line.type === 'product') {
+        const p = cartGetProduct(line.id);
+        return {
+          type: 'product',
+          productId: line.id,
+          qty: line.qty,
+          price: p ? cartComputePrice(p) : 0,
+          name: p ? p.name : '',
+        };
+      }
+      const b = cartGetBundle(line.id);
+      return {
+        type: 'bundle',
+        bundleId: line.id,
+        qty: line.qty,
+        price: b ? Number(b.price) || 0 : 0,
+        name: b ? b.name : '',
+        productIds: b ? b.productIds : [],
+      };
     }),
   };
 
@@ -275,35 +519,25 @@ document.addEventListener('submit', async function (e) {
   if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Placing order…'; }
 
   try {
-    cartLog('Saving order to Supabase…', order);
     await noirSaveOrderToDB(order);
     cartLog('Order saved ✓', order.id);
 
-    // Push to in-memory DB so admin sees it immediately
-    if (typeof NOIR_DB !== 'undefined' && NOIR_DB) {
-      NOIR_DB.orders.unshift(order);
-      cartLog('Pushed to NOIR_DB.orders (total orders:', NOIR_DB.orders.length, ')');
+    if (typeof window.NOIR_DB !== 'undefined' && window.NOIR_DB) {
+      window.NOIR_DB.orders.unshift(order);
     }
 
-    // Clear cart
-    NOIR_CART = [];
-    saveCart(NOIR_CART);
-    updateCartUI();
+    await syncCustomerAfterOrder(order);
+    await clearCart();
 
-    // Close modal + reset form
     const m = e.target.closest('dialog');
     if (m && typeof m.close === 'function') m.close();
     e.target.reset();
 
     if (typeof showToast === 'function') showToast('✅ Order ' + order.id + ' placed!');
 
-    // ✅ NO RELOAD — refresh UI in place
     if (typeof window.noirRefreshStoreData === 'function') {
-      cartLog('Calling noirRefreshStoreData() (no reload)…');
       await window.noirRefreshStoreData();
     }
-    // Re-render cart badge + totals after data refresh
-    updateCartUI();
   } catch (err) {
     cartErr('order save failed:', err);
     if (typeof showToast === 'function') showToast('❌ Order failed: ' + (err.message || 'Unknown error'));
@@ -312,17 +546,29 @@ document.addEventListener('submit', async function (e) {
   }
 });
 
-/* ---------- INIT ---------- */
-document.addEventListener('DOMContentLoaded', function () {
-  updateCartUI();
-  document.querySelectorAll('#cart-open, .cart-trigger').forEach(btn => {
-    if (btn._cartBound) return;
-    btn._cartBound = true;
-    btn.addEventListener('click', e => { e.preventDefault(); openCartDrawer(); });
-  });
-  cartLog('cart.js initialized');
-});
+/* ============================================================
+   INIT
+   ============================================================ */
+async function initCart() {
+  emitCartUpdate();
+  try { await syncForUser(); } catch (e) { cartWarn('sync failed:', e); }
 
-window.addEventListener('storage', function (e) {
-  if (e.key === NOIR_CART_KEY) { NOIR_CART = loadCart(); updateCartUI(); }
-});
+  window.addEventListener('noir:data-ready', () => emitCartUpdate());
+
+  if (window.db && window.db.auth && window.db.auth.onAuthStateChange) {
+    window.db.auth.onAuthStateChange(async (event) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+        await syncForUser();
+      }
+    });
+  }
+  window.addEventListener('noir:auth-changed', () => syncForUser());
+
+  cartLog('cart.js initialized (one-row-per-user, items jsonb)');
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initCart);
+} else {
+  initCart();
+}

@@ -1,7 +1,7 @@
 /* ============================================================
-   NOIR — products.js (shop grid)
-   Delegates rendering to app.js. Adds filters if they exist.
-   Adds optional "quick add product" helper (admin-only check).
+   NOIR — products.js
+   Delegates rendering to app.js.
+   Ensures cart badge + order sync work.
    ============================================================ */
 
 const PRODUCTS_DEBUG = true;
@@ -49,4 +49,10 @@ window.addEventListener('noir:language', function () {
     renderProducts();
     pLog('Re-rendered on language change');
   }
+});
+
+/* ✅ بعد أي إضافة للسلة، أعد رندر الشبكة (لتحديث الـ badges)
+   + أطلق noir:cart-updated (لو مش cart.js اللي عملها) */
+window.addEventListener('noir:cart-updated', function () {
+  pLog('cart updated — badge should refresh automatically via site-header');
 });

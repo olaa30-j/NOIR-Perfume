@@ -4,7 +4,7 @@ import { onLayoutReady } from './components/index.js';
    NOIR — shared utilities + UI (storefront)
    Fully guarded: no uncaught errors ever.
    Auth is handled EXCLUSIVELY by auth.js (Supabase only).
-   This file must NOT contain any auth logic, redirects, or demo code.
+   Rendering is centralized here — ONE source of truth.
    ============================================================ */
 
 /* ---------- SAFE HELPERS ---------- */
@@ -46,27 +46,6 @@ function noirDB() {
   return { products: [], bundles: [], orders: [], customers: [], settings: { language: 'en', radius: 6 } };
 }
 
-window.addEventListener('noir:data-ready', function (e) {
-  try {
-    console.log('[app.js] noir:data-ready →', e.detail);
-    if ($('#product-grid')) renderProducts();
-    if ($('#bestsellers-grid')) renderBestSellers();
-    if ($('#bundles-grid')) renderBundles();
-  } catch (err) {
-    console.error('[app.js] re-render after data-ready failed:', err);
-  }
-});
-
-window.addEventListener('noir:settings-ready', function (e) {
-  try {
-    const settings = e.detail;
-    if (settings?.language) {
-      document.documentElement.lang = settings.language;
-      document.documentElement.dir = settings.language === 'ar' ? 'rtl' : 'ltr';
-    }
-  } catch (err) { /* ignore */ }
-});
-
 function t(key) {
   return typeof noirT === 'function' ? noirT(key) : key;
 }
@@ -82,7 +61,6 @@ function getBundleById(id) {
 
 /* ============================================================
    1. MOBILE MENU + LANGUAGE SWITCHER
-   (جوه site-header → محتاج onLayoutReady)
    ============================================================ */
 onLayoutReady(function () {
   try {
@@ -196,59 +174,48 @@ function renderBundles() {
   grid.innerHTML = active.map(bundleCardHTML).join('');
 }
 
+function renderOffers() {
+  const grid = $('#offers-grid');
+  const section = $('#offers-section');
+  if (!grid || !section) return;
+  const db = noirDB();
+  const list = (db.products || []).filter(function (p) { return !!p.offer; });
+  if (!list.length) { section.hidden = true; return; }
+  section.hidden = false;
+  grid.innerHTML = list.map(productCardHTML).join('');
+}
+
 /* ============================================================
-   4. CLICK DELEGATION (add-to-cart, bundles, quick-view)
-   (event delegation على document → مش محتاج onLayoutReady)
+   MASTER RENDER — one entry point for every re-render
    ============================================================ */
-document.addEventListener('click', function (e) {
+function noirRenderAll() {
   try {
-    const addBtn = e.target.closest('[data-add-to-cart]');
-    if (addBtn) {
-      const id = Number(addBtn.dataset.addToCart);
-      if (typeof addToCart === 'function') {
-        addToCart(id, 1);
-        showToast('Added to bag');
-      }
-      return;
-    }
-
-    const bundleBtn = e.target.closest('[data-add-bundle]');
-    if (bundleBtn) {
-      const id = Number(bundleBtn.dataset.addBundle);
-      const bundle = getBundleById(id);
-      if (bundle && typeof addToCart === 'function') {
-        bundle.productIds.forEach(function (pid) { addToCart(pid, 1); });
-        showToast('Added "' + bundle.name + '" to bag');
-      }
-      return;
-    }
-
-    const quickBtn = e.target.closest('[data-quick-view]');
-    if (quickBtn && typeof openProductModal === 'function') {
-      openProductModal(Number(quickBtn.dataset.quickView));
-      return;
-    }
+    const db = noirDB();
+    if (!db.products) return;
+    if ($('#product-grid'))     renderProducts();
+    if ($('#bestsellers-grid')) renderBestSellers();
+    if ($('#bundles-grid'))     renderBundles();
+    if ($('#offers-grid'))      renderOffers();
   } catch (err) {
-    console.error('[app.js] click handler failed:', err);
+    console.error('[app.js] noirRenderAll failed:', err);
   }
-});
+}
 
 /* ============================================================
-   5. FILTERS + INITIAL RENDER
-   (العناصر في index.html — onLayoutReady آمنة في كل الحالات)
+   4. FILTERS — bound once, render once
    ============================================================ */
 onLayoutReady(function () {
   try {
-    const search = $('#product-search');
+    const search   = $('#product-search');
     const category = $('#category-filter');
-    const sort = $('#sort-filter');
+    const sort     = $('#sort-filter');
 
     function applyFilters() {
       const db = noirDB();
       let list = (db.products || []).slice();
-      const q = (search && search.value || '').toLowerCase().trim();
+      const q   = (search && search.value || '').toLowerCase().trim();
       const cat = (category && category.value) || 'all';
-      const s = (sort && sort.value) || 'featured';
+      const s   = (sort && sort.value) || 'featured';
 
       if (q) {
         list = list.filter(function (p) {
@@ -258,40 +225,83 @@ onLayoutReady(function () {
       if (cat !== 'all') {
         list = list.filter(function (p) { return p.category === cat; });
       }
-
-      if (s === 'low') list.sort(function (a, b) { return computePrice(a) - computePrice(b); });
-      else if (s === 'high') list.sort(function (a, b) { return computePrice(b) - computePrice(a); });
+      if (s === 'low')  list.sort(function (a, b) { return computePrice(a) - computePrice(b); });
+      if (s === 'high') list.sort(function (a, b) { return computePrice(b) - computePrice(a); });
 
       renderProducts(list);
     }
 
-    if (search) search.addEventListener('input', applyFilters);
+    if (search)   search.addEventListener('input', applyFilters);
     if (category) category.addEventListener('change', applyFilters);
-    if (sort) sort.addEventListener('change', applyFilters);
-
-    if ($('#product-grid')) renderProducts();
-    if ($('#bestsellers-grid')) renderBestSellers();
-    if ($('#bundles-grid')) renderBundles();
+    if (sort)     sort.addEventListener('change', applyFilters);
   } catch (e) {
     console.error('[app.js] filters init failed:', e);
   }
 });
 
 /* ============================================================
-   6. LISTEN FOR LANGUAGE CHANGES
-   (event على window → مش محتاج onLayoutReady)
+   5. GLOBAL EVENTS — data-ready / settings-ready / language
+   Single listener each. No duplicates anywhere else.
    ============================================================ */
-window.addEventListener('noir:language', function () {
-  try {
-    if ($('#product-grid')) renderProducts();
-    if ($('#bestsellers-grid')) renderBestSellers();
-    if ($('#bundles-grid')) renderBundles();
-  } catch (e) {}
+window.addEventListener('noir:data-ready', function (e) {
+  console.log('[app.js] noir:data-ready →', e.detail);
+  noirRenderAll();
 });
 
+window.addEventListener('noir:language', function () {
+  noirRenderAll();
+});
+
+window.addEventListener('noir:settings-ready', function (e) {
+  try {
+    const settings = e.detail;
+    if (!settings) return;
+
+    /* --- language + direction --- */
+    if (settings.language) {
+      document.documentElement.lang = settings.language;
+      document.documentElement.dir = settings.language === 'ar' ? 'rtl' : 'ltr';
+    }
+
+    /* --- branding: project name (first word in .brand span) --- */
+    if (settings.projectName) {
+      const first = settings.projectName.trim().split(/\s+/)[0];
+      document.querySelectorAll('.brand span').forEach(function (el) {
+        el.textContent = first;
+      });
+    }
+
+    /* --- branding: project address --- */
+    if (settings.projectAddress) {
+      document.querySelectorAll('[data-project-address]').forEach(function (el) {
+        el.textContent = settings.projectAddress;
+      });
+    }
+  } catch (err) {
+    console.error('[app.js] settings-ready handler failed:', err);
+  }
+});
+
+/* If settings already arrived before this script loaded */
+if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) {
+  const s = NOIR_DB.settings;
+  if (s.language) {
+    document.documentElement.lang = s.language;
+    document.documentElement.dir = s.language === 'ar' ? 'rtl' : 'ltr';
+  }
+  if (s.projectName) {
+    const first = s.projectName.trim().split(/\s+/)[0];
+    document.querySelectorAll('.brand span').forEach(el => { el.textContent = first; });
+  }
+  if (s.projectAddress) {
+    document.querySelectorAll('[data-project-address]').forEach(el => {
+      el.textContent = s.projectAddress;
+    });
+  }
+}
+
 /* ============================================================
-   7. NEWSLETTER (cosmetic)
-   (العنصر في index.html — onLayoutReady آمنة)
+   6. NEWSLETTER
    ============================================================ */
 onLayoutReady(function () {
   try {
@@ -309,12 +319,8 @@ onLayoutReady(function () {
 });
 
 /* ============================================================
-   8. NAVBAR BUTTONS — Search + Account
-   (search/account في site-header، admin في site-footer → onLayoutReady)
-   (signout-btn في account.html → DOMContentLoaded)
+   7. NAVBAR BUTTONS — Search + Account + Admin link
    ============================================================ */
-
-/* --- 8a. أزرار الـ layout (header/footer) --- */
 onLayoutReady(function () {
   try {
     /* ---- Search button ---- */
@@ -331,14 +337,11 @@ onLayoutReady(function () {
       });
     }
 
-    /* ---- Account button ----
-       auth.js already updates the header UI based on session.
-       Here we only redirect based on session role. */
+    /* ---- Account button ---- */
     const accountBtn = $('#account-button');
     if (accountBtn) {
       accountBtn.addEventListener('click', async function (e) {
         e.preventDefault();
-
         if (typeof window.noirGetSession === 'function') {
           try {
             const session = await window.noirGetSession();
@@ -350,8 +353,6 @@ onLayoutReady(function () {
             console.warn('[app.js] account button session check failed:', err);
           }
         }
-
-        // Not signed in → go to login
         window.location.href = 'login.html';
       });
     }
@@ -369,7 +370,9 @@ onLayoutReady(function () {
   }
 });
 
-/* --- 8b. Sign out button --- */
+/* ============================================================
+   8. Sign out button
+   ============================================================ */
 document.addEventListener('DOMContentLoaded', function () {
   try {
     const signoutBtn = $('#signout-btn');
@@ -387,8 +390,3 @@ document.addEventListener('DOMContentLoaded', function () {
     console.error('[app.js] signout init failed:', e);
   }
 });
-
-/* ============================================================
-   9. NOTE: admin.html guard is handled by admin.js (bootAdmin).
-   Do NOT add any redirect logic here — it would cause loops.
-   ============================================================ */
