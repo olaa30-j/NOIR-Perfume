@@ -239,6 +239,7 @@ async function noirLoadFromSupabase() {
       id: row.id,
       customer: row.customer_name,
       email: row.customer_email,
+      address: row.address || '',
       customerId: row.customer_id || null,
       date: row.created_at ? row.created_at.slice(0, 10) : '',
       total: Number(row.total),
@@ -250,7 +251,6 @@ async function noirLoadFromSupabase() {
     NOIR_DB.customers = (customersRes.data || []).map(row => ({
       id: row.id,
       userId: row.user_id || null,
-      cartId: row.cart_id || null,
       ordersList: Array.isArray(row.orders) ? row.orders : [],
       name: row.name,
       email: row.email,
@@ -362,7 +362,7 @@ async function noirDeleteBundleFromDB(id) {
 }
 
 /* ============================================================
-   WRITE: ORDER
+   WRITE: ORDER — now writes address + customer_id
    ============================================================ */
 async function noirSaveOrderToDB(order) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
@@ -379,22 +379,28 @@ async function noirSaveOrderToDB(order) {
     id: order.id,
     customer_name: order.customer,
     customer_email: order.email,
-    total: order.total,
+    total: Number(order.total) || 0,
     status: order.status || 'Processing',
     items: order.items || [],
   };
 
-  if (customerId) row.customer_id = customerId;
+  // ✅ optional columns — only sent when the source field has a value
+  if (order.address) row.address = String(order.address);
+  if (customerId)    row.customer_id = customerId;
 
-  storeLog('Saving order:', row.id, '| total:', row.total);
+  storeLog('Saving order:', row.id, '| address:', !!row.address, '| customer_id:', row.customer_id || '—');
 
-  const { data, error } = await window.db.from('orders').upsert(row, { onConflict: 'id' }).select();
+  const { data, error } = await window.db
+    .from('orders')
+    .upsert(row, { onConflict: 'id' })
+    .select()
+    .maybeSingle();
+
   if (error) {
     storeErr('Order save failed:', error);
     throw error;
   }
-  storeLog('Order saved ✓', data && data[0] ? data[0].id : row.id);
-  return data && data[0] ? data[0] : row;
+  return data || row;
 }
 
 async function noirUpdateOrderStatusInDB(id, status) {
@@ -405,7 +411,7 @@ async function noirUpdateOrderStatusInDB(id, status) {
 }
 
 /* ============================================================
-   WRITE: CUSTOMER
+   WRITE: CUSTOMER — no cart_id any more
    ============================================================ */
 async function noirSaveCustomerToDB(customer) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
@@ -425,7 +431,6 @@ async function noirSaveCustomerToDB(customer) {
   };
 
   if (Array.isArray(customer.orders)) row.orders = customer.orders;
-  if (customer.cartId != null) row.cart_id = customer.cartId;
 
   storeLog('Saving customer:', userId, '| orders:', row.orders?.length || 0);
 

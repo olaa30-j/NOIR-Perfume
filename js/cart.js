@@ -7,6 +7,8 @@
    - Guests: in-memory only
    - Logged-in: single Supabase row per user (created by DB trigger)
    - Emits 'noir:cart-updated' on every change
+   - Exposes getCartCountFromDB() so UI can read the count from
+     Supabase directly (authoritative), instead of memory.
    ============================================================ */
 
 const NOIR_CART_DEBUG = true;
@@ -140,6 +142,37 @@ async function sbClear(userId) {
     .update({ items: [], updated_at: new Date().toISOString() })
     .eq('user_id', userId);
   if (error) cartErr('sbClear failed:', error);
+}
+
+/**
+ * Authoritative cart count — read directly from Supabase.
+ * Returns 0 for guests or if Supabase is not available.
+ * Safe: never throws.
+ */
+async function getCartCountFromDB() {
+  if (!hasSB()) return 0;
+
+  const user = await sbGetUser();
+  if (!user.id) return 0;
+
+  try {
+    const { data, error } = await window.db
+      .from('carts')
+      .select('items')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (error) { cartWarn('getCartCountFromDB failed:', error); return 0; }
+
+    const items = data && Array.isArray(data.items) ? data.items : [];
+    return items.reduce(
+      (sum, it) => sum + Math.max(1, Number(it.qty) || 1),
+      0
+    );
+  } catch (e) {
+    cartWarn('getCartCountFromDB exception:', e);
+    return 0;
+  }
 }
 
 /* ---------- SYNC ---------- */
@@ -394,21 +427,22 @@ async function syncCustomerAfterOrder(order) {
 /* ============================================================
    EXPOSE API
    ============================================================ */
-window.addToCart        = addProductToCart;   // product alias
-window.addProductToCart = addProductToCart;
-window.addBundleToCart  = addBundleToCart;
-window.removeLine       = removeLine;
-window.updateLineQty    = updateLineQty;
-window.setLineQty       = setLineQty;
-window.clearCart        = clearCart;
-window.getCartItems     = getCartItems;
-window.getCartCount     = cartCount;
-window.getCartSubtotal  = cartSubtotal;
-window.cartSubtotal     = cartSubtotal;
-window.cartCount        = cartCount;
-window.openCartDrawer   = openCartDrawer;
-window.closeCartDrawer  = closeCartDrawer;
-window.openProductModal = openProductModal;
+window.addToCart           = addProductToCart;   // product alias
+window.addProductToCart    = addProductToCart;
+window.addBundleToCart     = addBundleToCart;
+window.removeLine          = removeLine;
+window.updateLineQty       = updateLineQty;
+window.setLineQty          = setLineQty;
+window.clearCart           = clearCart;
+window.getCartItems        = getCartItems;
+window.getCartCount        = cartCount;
+window.getCartCountFromDB  = getCartCountFromDB;   // ← authoritative count
+window.getCartSubtotal     = cartSubtotal;
+window.cartSubtotal        = cartSubtotal;
+window.cartCount           = cartCount;
+window.openCartDrawer      = openCartDrawer;
+window.closeCartDrawer     = closeCartDrawer;
+window.openProductModal    = openProductModal;
 
 Object.defineProperty(window, 'noirCart', {
   get() { return { items: getCartItems() }; },
@@ -564,7 +598,7 @@ async function initCart() {
   }
   window.addEventListener('noir:auth-changed', () => syncForUser());
 
-  cartLog('cart.js initialized (one-row-per-user, items jsonb)');
+  cartLog('cart.js initialized (one-row-per-user, items jsonb, backend count ready)');
 }
 
 if (document.readyState === 'loading') {

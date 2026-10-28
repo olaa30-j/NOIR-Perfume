@@ -1,3 +1,9 @@
+/* ============================================================
+   NOIR — <site-cart> custom element
+   Works with cart.js (one-row-per-user, items jsonb)
+   Supports products AND bundles per line.
+   ============================================================ */
+
 class SiteCart extends HTMLElement {
   connectedCallback() {
     this.innerHTML = `
@@ -23,7 +29,7 @@ class SiteCart extends HTMLElement {
       </aside>
     `;
 
-    // --- روابط أساسية ---
+    /* --- basic bindings --- */
     this.querySelector('[data-cart-close]').addEventListener('click', () => this.close());
     this.querySelector('[data-cart-backdrop]').addEventListener('click', () => this.close());
     this.querySelector('[data-checkout]').addEventListener('click', () => {
@@ -31,15 +37,15 @@ class SiteCart extends HTMLElement {
       this._openCheckout();
     });
 
-    // --- ESC ---
+    /* --- ESC --- */
     this._onKey = (e) => { if (e.key === 'Escape') this.close(); };
     document.addEventListener('keydown', this._onKey);
 
-    // --- رندر أولي ---
+    /* --- initial render --- */
     this.render();
     this._syncHeaderCount();
 
-    // --- استماع للتحديثات ---
+    /* --- listen for updates --- */
     this._onCartUpdate = () => {
       this.render();
       this._syncHeaderCount();
@@ -57,7 +63,7 @@ class SiteCart extends HTMLElement {
   }
 
   /* ============================================================
-     فتح checkout-modal
+     Checkout modal
      ============================================================ */
   _openCheckout() {
     const tryOpen = () => {
@@ -72,10 +78,8 @@ class SiteCart extends HTMLElement {
 
     if (tryOpen()) return;
 
-    // لو لسه مش موجودة، استنى
     customElements.whenDefined('site-modals').then(() => {
       if (!tryOpen()) {
-        // fallback: دور على <dialog id="checkout-modal">
         const dlg = document.getElementById('checkout-modal');
         if (dlg) {
           if (typeof dlg.showModal === 'function') dlg.showModal();
@@ -88,7 +92,7 @@ class SiteCart extends HTMLElement {
   }
 
   /* ============================================================
-     تحديث العدد في الهيدر
+     Header count
      ============================================================ */
   _syncHeaderCount() {
     let count = 0;
@@ -99,9 +103,8 @@ class SiteCart extends HTMLElement {
         const items = window.getCartItems() || [];
         count = items.reduce((sum, x) => sum + (Number(x.qty) || 0), 0);
       }
-    } catch (e) { }
+    } catch (e) { /* ignore */ }
 
-    // حدّث كل الـ badges (ممكن يكون فيه أكتر من واحد)
     document.querySelectorAll('#cart-count, .cart-count').forEach(el => {
       el.textContent = count;
       el.classList.toggle('hidden', count === 0);
@@ -110,7 +113,7 @@ class SiteCart extends HTMLElement {
   }
 
   /* ============================================================
-     رندر محتوى السلة
+     Render (products + bundles)
      ============================================================ */
   render() {
     const itemsEl = this.querySelector('[data-cart-items]');
@@ -120,14 +123,10 @@ class SiteCart extends HTMLElement {
     const cart =
       (typeof window.getCartItems === 'function' && window.getCartItems()) ||
       (typeof window.noirCart !== 'undefined' && window.noirCart.items) ||
-      (typeof window.cart !== 'undefined' && window.cart.items) ||
       [];
 
-    let subtotal = 0;
-    const lines = itemsEl;
-
     if (!Array.isArray(cart) || cart.length === 0) {
-      lines.innerHTML = `
+      itemsEl.innerHTML = `
         <div class="cart-empty">
           <p>Your bag is empty.</p>
           <a href="shop.html" class="button button-outline" style="margin-top:12px;display:inline-block">
@@ -143,43 +142,58 @@ class SiteCart extends HTMLElement {
       ? window.escapeHTML
       : (s) => String(s == null ? '' : s);
 
-    lines.innerHTML = cart.map((line) => {
-      const product = line.product || line;
-      const qty = Number(line.qty ?? line.quantity ?? 1) || 1;
+    let subtotal = 0;
 
+    itemsEl.innerHTML = cart.map((line) => {
+      const type = line.type || 'product';
+      const qty = Number(line.qty) || 1;
+      const key = `${type}:${line.id}`;
+
+      /* ---- resolve displayed data per type ---- */
+      let name = 'Item';
+      let category = '';
+      let bottle = '';
       let unit = 0;
-      try {
-        unit = (typeof window.noirComputePrice === 'function')
-          ? window.noirComputePrice(product)
-          : Number(product.price) || 0;
-      } catch (e) {
-        unit = Number(product.price) || 0;
+
+      if (type === 'bundle') {
+        const b = line.bundle || {};
+        name = b.name || 'Bundle';
+        category = 'Bundle';
+        bottle = b.bottle || '';
+        unit = Number(b.price) || 0;
+      } else {
+        const p = line.product || {};
+        name = p.name || 'Product';
+        category = p.category || '';
+        bottle = p.bottle || '';
+        try {
+          unit = (typeof window.noirComputePrice === 'function')
+            ? window.noirComputePrice(p)
+            : Number(p.price) || 0;
+        } catch (e) {
+          unit = Number(p.price) || 0;
+        }
       }
 
       const lineTotal = unit * qty;
       subtotal += lineTotal;
 
-      const name = esc(product.name || 'Product');
-      const category = esc(product.category || '');
-      const bottle = esc(product.bottle || '');
-      const id = product.id ?? line.id ?? '';
-
       return `
-        <div class="cart-line" data-line-id="${id}">
+        <div class="cart-line" data-line-type="${type}" data-line-id="${line.id}">
           <div class="cart-line-visual">
-            <div class="product-bottle ${bottle}"></div>
+            <div class="product-bottle ${esc(bottle)}"></div>
           </div>
           <div class="cart-line-info">
-            <p class="product-category">${category}</p>
-            <h3>${name}</h3>
+            <p class="product-category">${esc(category)}</p>
+            <h3>${esc(name)}</h3>
             <p class="cart-line-price">
               $${unit.toFixed(2)} × ${qty} = <strong>$${lineTotal.toFixed(2)}</strong>
             </p>
             <div class="cart-line-actions">
-              <button class="qty-btn" data-cart-dec="${id}" aria-label="Decrease quantity">−</button>
+              <button class="qty-btn" data-cart-minus="${key}" aria-label="Decrease quantity">−</button>
               <span class="qty-val">${qty}</span>
-              <button class="qty-btn" data-cart-inc="${id}" aria-label="Increase quantity">+</button>
-              <button class="remove-btn" data-cart-remove="${id}" aria-label="Remove">Remove</button>
+              <button class="qty-btn" data-cart-plus="${key}" aria-label="Increase quantity">+</button>
+              <button class="remove-btn" data-cart-remove="${key}" aria-label="Remove">Remove</button>
             </div>
           </div>
         </div>
@@ -188,49 +202,16 @@ class SiteCart extends HTMLElement {
 
     if (subtotalEl) subtotalEl.textContent = `$${subtotal.toFixed(2)}`;
 
-    // --- ربط الأزرار ---
-    lines.querySelectorAll('[data-cart-inc]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const id = Number(btn.dataset.cartInc);
-        if (typeof window.addToCart === 'function') {
-          await window.addToCart(id, 1);
-        } else if (typeof window.setCartQty === 'function') {
-          const line = cart.find(x => Number(x.id ?? x.product?.id) === id);
-          const current = line ? Number(line.qty ?? 1) : 1;
-          await window.setCartQty(id, current + 1);
-        }
-        this.render();
-        this._syncHeaderCount();
-      });
-    });
-
-    lines.querySelectorAll('[data-cart-dec]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const id = Number(btn.dataset.cartDec);
-        if (typeof window.updateCartQty === 'function') {
-          await window.updateCartQty(id, -1);
-        } else if (typeof window.addToCart === 'function') {
-          await window.addToCart(id, -1);
-        }
-        this.render();
-        this._syncHeaderCount();
-      });
-    });
-
-    lines.querySelectorAll('[data-cart-remove]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const id = Number(btn.dataset.cartRemove);
-        if (typeof window.removeFromCart === 'function') {
-          await window.removeFromCart(id);
-        }
-        this.render();
-        this._syncHeaderCount();
-      });
-    });
+    /* ------------------------------------------------------------
+       IMPORTANT: do NOT bind click handlers here.
+       cart.js already has delegated listeners for
+       [data-cart-minus] / [data-cart-plus] / [data-cart-remove]
+       that accept "product:12" / "bundle:3".
+       ------------------------------------------------------------ */
   }
 
   /* ============================================================
-     فتح / إغلاق (بسيط — يعتمد على CSS)
+     Open / close (CSS driven)
      ============================================================ */
   open() {
     const drawer = this.querySelector('.cart-drawer');

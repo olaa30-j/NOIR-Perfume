@@ -1,3 +1,10 @@
+/* ============================================================
+   NOIR — <site-header> custom element
+   Uses noirGetSession() (returns { userId, email, role, name })
+   Cart count is fetched from Supabase (authoritative), with
+   in-memory fallback via getCartCount().
+   ============================================================ */
+
 class SiteHeader extends HTMLElement {
   connectedCallback() {
     this.innerHTML = `
@@ -35,19 +42,19 @@ class SiteHeader extends HTMLElement {
       </header>
     `;
 
-    // --- المنيو ---
+    /* ---- menu ---- */
     this.querySelector('#menu-toggle').addEventListener('click', (e) => {
       const nav = this.querySelector('#main-nav');
       const open = nav.classList.toggle('open');
       e.currentTarget.setAttribute('aria-expanded', String(open));
     });
 
-    // --- فتح السلة ---
+    /* ---- open cart ---- */
     this.querySelector('#cart-open').addEventListener('click', () => {
       this._openCart();
     });
 
-    // --- زر الحساب ---
+    /* ---- account ---- */
     this.querySelector('#account-button').addEventListener('click', async () => {
       const session = await this._getSession();
       if (session) {
@@ -57,7 +64,7 @@ class SiteHeader extends HTMLElement {
       }
     });
 
-    // --- checkout السريع ---
+    /* ---- quick checkout ---- */
     this.querySelector('#checkout-quick').addEventListener('click', () => {
       const cart = this._findCart();
       if (cart && typeof cart.open === 'function') cart.open();
@@ -68,7 +75,7 @@ class SiteHeader extends HTMLElement {
       }, 200);
     });
 
-    // --- البحث ---
+    /* ---- search ---- */
     this.querySelector('#search-toggle').addEventListener('click', () => {
       if (document.getElementById('product-search')) {
         document.getElementById('product-search').focus();
@@ -77,43 +84,75 @@ class SiteHeader extends HTMLElement {
       }
     });
 
-    // --- الرابط الحالي ---
+    /* ---- active link ---- */
     const path = location.pathname.split('/').pop() || 'index.html';
     this.querySelectorAll('#main-nav a').forEach(a => {
       const href = a.getAttribute('href');
       if (href === path) a.setAttribute('aria-current', 'page');
     });
 
-    // --- تحديث السلة ---
-    this._onCartUpdate = (e) => {
-      const items = (e && e.detail && e.detail.items) || [];
-      const count = items.reduce((sum, x) => sum + (Number(x.qty) || 0), 0);
-      this.setCartCount(count);
-      this._updateCheckoutButton(count);
+    /* ---- cart updates: re-fetch from backend ---- */
+    this._onCartUpdate = () => {
+      this._refreshCount();
     };
     window.addEventListener('noir:cart-updated', this._onCartUpdate);
+    window.addEventListener('noir:data-ready', this._onCartUpdate);
 
-    // --- تحديث الحساب ---
-    this._onAuthChanged = () => this.updateAccountUI();
+    /* ---- auth updates ---- */
+    this._onAuthChanged = () => {
+      this.updateAccountUI();
+      this._refreshCount();
+    };
     window.addEventListener('noir:auth-changed', this._onAuthChanged);
     window.addEventListener('noir:session-ready', this._onAuthChanged);
     if (window.db && window.db.auth && window.db.auth.onAuthStateChange) {
       this._authSub = window.db.auth.onAuthStateChange(() => {
         this.updateAccountUI();
+        this._refreshCount();
       });
     }
 
-    // --- تحديث أولي ---
+    /* ---- initial ---- */
     this._initialUpdate();
   }
 
   disconnectedCallback() {
     window.removeEventListener('noir:cart-updated', this._onCartUpdate);
+    window.removeEventListener('noir:data-ready', this._onCartUpdate);
     window.removeEventListener('noir:auth-changed', this._onAuthChanged);
     window.removeEventListener('noir:session-ready', this._onAuthChanged);
     if (this._authSub && this._authSub.data && this._authSub.data.subscription) {
-      try { this._authSub.data.subscription.unsubscribe(); } catch (e) { }
+      try { this._authSub.data.subscription.unsubscribe(); } catch (e) { /* ignore */ }
     }
+  }
+
+  /* ============================================================
+     CART COUNT — from backend (authoritative)
+     ============================================================ */
+  async _fetchCount() {
+    // 1) try backend
+    if (typeof window.getCartCountFromDB === 'function') {
+      try {
+        const n = await window.getCartCountFromDB();
+        if (typeof n === 'number' && !Number.isNaN(n)) {
+          return { count: n, source: 'backend' };
+        }
+      } catch (e) { /* ignore */ }
+    }
+    // 2) fallback to in-memory
+    if (typeof window.getCartCount === 'function') {
+      try {
+        return { count: Number(window.getCartCount()) || 0, source: 'memory' };
+      } catch (e) { /* ignore */ }
+    }
+    return { count: 0, source: 'none' };
+  }
+
+  async _refreshCount() {
+    const { count, source } = await this._fetchCount();
+    this.setCartCount(count);
+    this._updateCheckoutButton(count);
+    // (debug) console.log('[header] cart count', count, 'from', source);
   }
 
   /* ============================================================
@@ -130,7 +169,6 @@ class SiteHeader extends HTMLElement {
     const cart = this._findCart();
 
     if (!cart) {
-      // استنى noir-layout
       if (customElements.get('noir-layout')) {
         setTimeout(() => {
           const c = this._findCart();
@@ -179,16 +217,18 @@ class SiteHeader extends HTMLElement {
   }
 
   /* ============================================================
-     ACCOUNT: session + UI
+     SESSION — normalized shape
      ============================================================ */
   async _getSession() {
     if (typeof window.noirGetSession === 'function') {
       try {
         const s = await window.noirGetSession();
-        if (s) {
+        if (s && (s.userId || s.email)) {
           return {
-            user: s.user || s,
-            role: s.role || s.user?.role || null,
+            userId: s.userId || null,
+            email: s.email || null,
+            role: s.role || 'customer',
+            name: s.name || '',
           };
         }
       } catch (e) { /* ignore */ }
@@ -196,11 +236,13 @@ class SiteHeader extends HTMLElement {
     if (window.db && window.db.auth) {
       try {
         const { data } = await window.db.auth.getUser();
-        const user = data?.user;
+        const user = data && data.user;
         if (user) {
           return {
-            user,
-            role: user.app_metadata?.role || user.user_metadata?.role || null,
+            userId: user.id,
+            email: user.email || null,
+            role: user.app_metadata?.role || user.user_metadata?.role || 'customer',
+            name: user.user_metadata?.name || '',
           };
         }
       } catch (e) { /* ignore */ }
@@ -209,18 +251,7 @@ class SiteHeader extends HTMLElement {
   }
 
   async _initialUpdate() {
-    let count = 0;
-    try {
-      if (typeof window.getCartCount === 'function') {
-        count = Number(window.getCartCount()) || 0;
-      } else if (typeof window.getCartItems === 'function') {
-        const items = window.getCartItems() || [];
-        count = items.reduce((sum, x) => sum + (Number(x.qty) || 0), 0);
-      }
-    } catch (e) { }
-    this.setCartCount(count);
-    this._updateCheckoutButton(count);
-
+    await this._refreshCount();
     await this.updateAccountUI();
   }
 
@@ -251,24 +282,19 @@ class SiteHeader extends HTMLElement {
       if (badgeEl) badgeEl.classList.add('hidden');
     }
 
-    // ✅ تحديث زر checkout حسب الحالة
-    this._updateCheckoutButton(
-      typeof window.getCartCount === 'function' ? window.getCartCount() : 0,
-      !!session
-    );
+    const { count } = await this._fetchCount();
+    this._updateCheckoutButton(count, !!session);
   }
 
   _updateCheckoutButton(count, isLoggedIn) {
     const btn = this.querySelector('#checkout-quick');
     if (!btn) return;
 
-    // لو isLoggedIn مش محدد، خليه null (يظهر لو فيه منتجات بس)
     const hasItems = Number(count) > 0;
 
     if (isLoggedIn === undefined) {
-      // fallback: اعتمد على وجود badge الحساب
       const badge = this.querySelector('#account-badge');
-      isLoggedIn = badge && !badge.classList.contains('hidden');
+      isLoggedIn = !!(badge && !badge.classList.contains('hidden'));
     }
 
     const show = hasItems && isLoggedIn;
@@ -282,6 +308,14 @@ class SiteHeader extends HTMLElement {
     el.textContent = count;
     el.classList.toggle('hidden', count === 0);
     el.classList.toggle('is-empty', count === 0);
+
+    const cartBtn = this.querySelector('#cart-open');
+    if (cartBtn) {
+      cartBtn.setAttribute(
+        'aria-label',
+        count === 0 ? 'Open shopping bag (empty)' : `Open shopping bag (${count} item${count > 1 ? 's' : ''})`
+      );
+    }
   }
 }
 
