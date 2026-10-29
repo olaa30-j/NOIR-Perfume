@@ -10,10 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-  <!-- Global shared styles (theme, header, footer, buttons, keyframes) -->
   <link rel="stylesheet" href="css/styles.css">
-
-  <!-- Page-specific styles (collections feature rows) -->
   <link rel="stylesheet" href="css/pages/collections.css">
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -38,7 +35,7 @@
   <noir-layout>
     <main class="collections-page">
 
-      <!-- HERO — shared .story-section pattern (same as shop.html / story.html) -->
+      <!-- HERO -->
       <section class="story-section section-wrap" id="story">
         <p class="eyebrow centered">Our collections</p>
         <h2>Curated gift sets<br><em>for every moment.</em></h2>
@@ -46,7 +43,7 @@
         <a href="shop.html" class="text-link">Explore fragrances <span>→</span></a>
       </section>
 
-      <!-- Bundle rows (rendered by inline script below) -->
+      <!-- Bundle rows -->
       <div id="collections-list" class="collection-list"></div>
       <p id="collections-empty" class="collections-empty hidden">
         No collections available right now.
@@ -62,6 +59,9 @@
       const money = (n) => '$' + (Math.round(Number(n) * 100) / 100).toFixed(2);
       const pad2 = (n) => String(n).padStart(2, '0');
 
+      // هل القيمة رابط صورة أم اسم كلاس CSS قديم؟
+      const isImageUrl = (v) => typeof v === 'string' && /^(https?:\/\/|\/)/.test(v);
+
       function getBundleProducts(bundle) {
         const db = window.NOIR_DB || {};
         const products = Array.isArray(db.products) ? db.products : [];
@@ -70,15 +70,24 @@
           .filter(Boolean);
       }
 
+      // عرض زجاجة منتج: صورة إن وُجد رابط، وإلا الشكل القديم
+      function productVisualHTML(p, extraClass) {
+        if (isImageUrl(p.bottle)) {
+          return `<img class="collection-product-img ${extraClass || ''}" src="${esc(p.bottle)}" alt="${esc(p.name)}" loading="lazy">`;
+        }
+        return `<div class="product-bottle ${esc(p.bottle || '')} ${extraClass || ''}"></div>`;
+      }
+
       function renderFeature(b, index) {
         const items = getBundleProducts(b);
         const original = items.reduce((s, p) => s + (Number(p.price) || 0), 0);
         const price = Number(b.price) || 0;
         const savings = original - price;
 
-        const bottles = items.slice(0, 4)
-          .map(p => `<div class="product-bottle ${esc(p.bottle || '')}"></div>`)
-          .join('');
+        // 1) صورة الحزمة الرئيسية — إن وُجد رابط صورة في b.bottle
+        const cover = isImageUrl(b.bottle)
+          ? `<img class="collection-cover" src="${esc(b.bottle)}" alt="${esc(b.name)}" loading="lazy">`
+          : `<div class="bottle-stack">${items.slice(0, 4).map(p => productVisualHTML(p)).join('')}</div>`;
 
         const contents = items.map((p, i) => `
           <div class="contents-row">
@@ -89,10 +98,10 @@
         `).join('');
 
         return `
-          <article class="collection-feature" data-bundle-id="${b.id}">
+          <article class="collection-feature ${isImageUrl(b.bottle) ? 'has-cover' : ''}" data-bundle-id="${b.id}">
             <div class="collection-visual">
               <span class="collection-number">${pad2(index + 1)}</span>
-              <div class="bottle-stack">${bottles}</div>
+              ${cover}
             </div>
 
             <div class="collection-body">

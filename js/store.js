@@ -1,9 +1,6 @@
 /* ============================================================
    NOIR — Central Store (Supabase ONLY)
    All reads/writes go directly to Supabase.
-   site_settings (project name, address, theme, language, radius,
-   fonts, colors) are also Supabase-backed — single row id = 1.
-   NO localStorage anywhere. NO legacy migration.
    ============================================================ */
 
 const STORE_DEBUG = true;
@@ -23,6 +20,7 @@ let NOIR_DB = {
   bundles: [],
   orders: [],
   customers: [],
+  heroSlides: [],
   settings: {
     projectName: 'NOIR Arabian Perfumes',
     projectAddress: '',
@@ -37,7 +35,6 @@ let NOIR_DB = {
   },
 };
 
-/* ---------- EXPOSE TO GLOBAL ---------- */
 window.NOIR_DB = NOIR_DB;
 
 /* ---------- SUPABASE DETECTION ---------- */
@@ -146,9 +143,6 @@ async function noirSaveAppSettings(partial) {
     accent_color: NOIR_DB.settings.accentColor ?? null,
   };
 
-  storeLog('Saving settings…', row);
-
-  // 1) UPDATE
   let { data, error } = await window.db
     .from('site_settings')
     .update(row)
@@ -161,7 +155,6 @@ async function noirSaveAppSettings(partial) {
     throw error;
   }
 
-  // 2) INSERT لو مفيش صف
   if (!data) {
     const insertRes = await window.db
       .from('site_settings')
@@ -176,13 +169,12 @@ async function noirSaveAppSettings(partial) {
   }
 
   noirApplySettingsToState(data);
-  storeLog('Settings saved ✓', NOIR_DB.settings);
   window.dispatchEvent(new CustomEvent('noir:settings-ready', { detail: NOIR_DB.settings }));
   return data;
 }
 
 /* ============================================================
-   LOAD ALL FROM SUPABASE — كل جدول optional
+   LOAD ALL FROM SUPABASE
    ============================================================ */
 async function noirLoadFromSupabase() {
   if (!noirHasSupabase()) {
@@ -196,19 +188,20 @@ async function noirLoadFromSupabase() {
   storeLog('Loading all data from Supabase…');
 
   try {
-    const [productsRes, bundlesRes, ordersRes, customersRes] = await Promise.all([
+    const [productsRes, bundlesRes, ordersRes, customersRes, heroRes] = await Promise.all([
       window.db.from('products').select('*').order('id', { ascending: true }),
       window.db.from('bundles').select('*').order('id', { ascending: true }),
       window.db.from('orders').select('*').order('created_at', { ascending: false }),
       window.db.from('customers').select('*').order('name', { ascending: true }),
+      window.db.from('hero_slides').select('*').order('position', { ascending: true }),
     ]);
 
     if (productsRes.error) storeErr('products load failed:', productsRes.error);
-    if (bundlesRes.error)  storeWarn('bundles load failed (non-fatal):', bundlesRes.error.message || bundlesRes.error);
-    if (ordersRes.error)   storeWarn('orders load failed (non-fatal):', ordersRes.error.message || ordersRes.error);
-    if (customersRes.error) storeWarn('customers load failed (non-fatal):', customersRes.error.message || customersRes.error);
+    if (bundlesRes.error)  storeWarn('bundles load failed:', bundlesRes.error.message || bundlesRes.error);
+    if (ordersRes.error)   storeWarn('orders load failed:', ordersRes.error.message || ordersRes.error);
+    if (customersRes.error) storeWarn('customers load failed:', customersRes.error.message || customersRes.error);
+    if (heroRes.error)     storeWarn('hero_slides load failed:', heroRes.error.message || heroRes.error);
 
-    /* ---------- products ---------- */
     NOIR_DB.products = (productsRes.data || []).map(row => ({
       id: row.id,
       name: row.name,
@@ -223,7 +216,6 @@ async function noirLoadFromSupabase() {
       offer: row.offer || null,
     }));
 
-    /* ---------- bundles ---------- */
     NOIR_DB.bundles = (bundlesRes.data || []).map(row => ({
       id: row.id,
       name: row.name,
@@ -231,10 +223,10 @@ async function noirLoadFromSupabase() {
       productIds: row.product_ids || [],
       price: Number(row.price),
       badge: row.badge || '',
+      bottle: row.bottle || '',
       active: row.active !== false,
     }));
 
-    /* ---------- orders ---------- */
     NOIR_DB.orders = (ordersRes.data || []).map(row => ({
       id: row.id,
       customer: row.customer_name,
@@ -247,20 +239,39 @@ async function noirLoadFromSupabase() {
       items: row.items || [],
     }));
 
-    /* ---------- customers ---------- */
     NOIR_DB.customers = (customersRes.data || []).map(row => ({
       id: row.id,
       userId: row.user_id || null,
       ordersList: Array.isArray(row.orders) ? row.orders : [],
       name: row.name,
       email: row.email,
+      avatarUrl: row.avatar_url || '',
       orders: Array.isArray(row.orders) ? row.orders.length : (Number(row.orders) || 0),
       spent: Number(row.spent) || 0,
     }));
 
+    NOIR_DB.heroSlides = (heroRes.data || []).map(row => ({
+      id: row.id,
+      position: row.position,
+      active: row.active !== false,
+      theme: row.theme || 'classic',
+      eyebrow: row.eyebrow || '',
+      titleLine1: row.title_line1 || '',
+      titleLine2: row.title_line2 || '',
+      description: row.description || '',
+      ctaText: row.cta_text || '',
+      ctaLink: row.cta_link || '',
+      note: row.note || '',
+      bottleImage: row.bottle_image || '',
+      artCaption: row.art_caption || '',
+      videoUrl: row.video_url || '',
+      videoPoster: row.video_poster || '',
+      overlayOpacity: Number(row.overlay_opacity) || 45,
+    }));
+
     window.NOIR_DB = NOIR_DB;
 
-    storeLog(`Loaded: ${NOIR_DB.products.length} products, ${NOIR_DB.orders.length} orders, ${NOIR_DB.bundles.length} bundles, ${NOIR_DB.customers.length} customers`);
+    storeLog(`Loaded: ${NOIR_DB.products.length} products, ${NOIR_DB.bundles.length} bundles, ${NOIR_DB.heroSlides.length} hero slides`);
 
     window.dispatchEvent(new CustomEvent('noir:data-ready', {
       detail: { source: 'supabase' },
@@ -275,18 +286,9 @@ async function noirLoadFromSupabase() {
   }
 }
 
-/* ============================================================
-   REFRESH — data only; rendering handled by app.js via noir:data-ready
-   ============================================================ */
 async function noirRefreshStoreData() {
-  storeLog('noirRefreshStoreData() start');
   const ok = await noirLoadFromSupabase();
-  if (!ok) {
-    storeWarn('Refresh failed');
-    return false;
-  }
-  storeLog('noirRefreshStoreData() done ✓');
-  return true;
+  return ok;
 }
 
 /* ============================================================
@@ -328,7 +330,7 @@ async function noirDeleteProductFromDB(id) {
 }
 
 /* ============================================================
-   WRITE: BUNDLE
+   WRITE: BUNDLE — uses `bottle` column (already exists)
    ============================================================ */
 async function noirSaveBundleToDB(bundle) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
@@ -339,6 +341,7 @@ async function noirSaveBundleToDB(bundle) {
     product_ids: bundle.productIds,
     price: bundle.price,
     badge: bundle.badge || '',
+    bottle: bundle.bottle || '',
     active: bundle.active !== false,
   };
 
@@ -362,7 +365,49 @@ async function noirDeleteBundleFromDB(id) {
 }
 
 /* ============================================================
-   WRITE: ORDER — now writes address + customer_id
+   WRITE: HERO SLIDE
+   ============================================================ */
+async function noirSaveHeroSlideToDB(slide) {
+  if (!noirHasSupabase()) throw new Error('Supabase not configured');
+
+  const row = {
+    position: Number(slide.position) || 1,
+    active: slide.active !== false,
+    theme: slide.theme || 'classic',
+    eyebrow: slide.eyebrow || '',
+    title_line1: slide.titleLine1 || '',
+    title_line2: slide.titleLine2 || '',
+    description: slide.description || '',
+    cta_text: slide.ctaText || '',
+    cta_link: slide.ctaLink || '',
+    note: slide.note || '',
+    bottle_image: slide.bottleImage || '',
+    art_caption: slide.artCaption || '',
+    video_url: slide.videoUrl || '',
+    video_poster: slide.videoPoster || '',
+    overlay_opacity: Number(slide.overlayOpacity) || 45,
+  };
+
+  if (slide.id) {
+    row.id = slide.id;
+    const { data, error } = await window.db.from('hero_slides').upsert(row, { onConflict: 'id' }).select();
+    if (error) throw error;
+    return data && data[0] ? data[0] : row;
+  }
+  const { data, error } = await window.db.from('hero_slides').insert(row).select();
+  if (error) throw error;
+  return data && data[0] ? data[0] : row;
+}
+
+async function noirDeleteHeroSlideFromDB(id) {
+  if (!noirHasSupabase()) throw new Error('Supabase not configured');
+  const { error } = await window.db.from('hero_slides').delete().eq('id', Number(id));
+  if (error) throw error;
+  return true;
+}
+
+/* ============================================================
+   WRITE: ORDER
    ============================================================ */
 async function noirSaveOrderToDB(order) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
@@ -384,11 +429,8 @@ async function noirSaveOrderToDB(order) {
     items: order.items || [],
   };
 
-  // ✅ optional columns — only sent when the source field has a value
   if (order.address) row.address = String(order.address);
   if (customerId)    row.customer_id = customerId;
-
-  storeLog('Saving order:', row.id, '| address:', !!row.address, '| customer_id:', row.customer_id || '—');
 
   const { data, error } = await window.db
     .from('orders')
@@ -396,10 +438,7 @@ async function noirSaveOrderToDB(order) {
     .select()
     .maybeSingle();
 
-  if (error) {
-    storeErr('Order save failed:', error);
-    throw error;
-  }
+  if (error) throw error;
   return data || row;
 }
 
@@ -411,7 +450,7 @@ async function noirUpdateOrderStatusInDB(id, status) {
 }
 
 /* ============================================================
-   WRITE: CUSTOMER — no cart_id any more
+   WRITE: CUSTOMER
    ============================================================ */
 async function noirSaveCustomerToDB(customer) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
@@ -431,8 +470,7 @@ async function noirSaveCustomerToDB(customer) {
   };
 
   if (Array.isArray(customer.orders)) row.orders = customer.orders;
-
-  storeLog('Saving customer:', userId, '| orders:', row.orders?.length || 0);
+  if (customer.avatarUrl) row.avatar_url = customer.avatarUrl;
 
   let { data, error } = await window.db
     .from('customers')
@@ -441,22 +479,78 @@ async function noirSaveCustomerToDB(customer) {
     .select()
     .maybeSingle();
 
-  if (error) {
-    storeErr('Customer update failed:', error);
-    throw error;
-  }
+  if (error) throw error;
 
   if (!data) {
     const ins = await window.db.from('customers').insert(row).select().maybeSingle();
-    if (ins.error) {
-      storeErr('Customer insert failed:', ins.error);
-      throw ins.error;
-    }
+    if (ins.error) throw ins.error;
     data = ins.data;
   }
-
-  storeLog('Customer saved ✓', data);
   return data;
+}
+
+/* ============================================================
+   STORAGE HELPERS
+   ============================================================ */
+async function noirUploadProductImage(file) {
+  if (!noirHasSupabase()) throw new Error('Supabase not configured');
+  const path = `${Date.now()}-${file.name.replace(/\s+/g, '-')}`;
+  const { data, error } = await window.db.storage
+    .from('product-images')
+    .upload(path, file, { cacheControl: '3600', upsert: false });
+  if (error) throw error;
+  const { data: urlData } = window.db.storage
+    .from('product-images')
+    .getPublicUrl(data.path);
+  return urlData.publicUrl;
+}
+
+async function noirUploadBundleImage(file) {
+  if (!noirHasSupabase()) throw new Error('Supabase not configured');
+  const path = `${Date.now()}-${file.name.replace(/\s+/g, '-')}`;
+  const { data, error } = await window.db.storage
+    .from('bundle-images')
+    .upload(path, file, { cacheControl: '3600', upsert: false });
+  if (error) throw error;
+  const { data: urlData } = window.db.storage
+    .from('bundle-images')
+    .getPublicUrl(data.path);
+  return urlData.publicUrl;
+}
+
+async function noirUploadHeroVideo(file) {
+  if (!noirHasSupabase()) throw new Error('Supabase not configured');
+  const path = `hero/${Date.now()}-${file.name.replace(/\s+/g, '-')}`;
+  const { data, error } = await window.db.storage
+    .from('bundle-images')
+    .upload(path, file, { cacheControl: '3600', upsert: false });
+  if (error) throw error;
+  const { data: urlData } = window.db.storage
+    .from('bundle-images')
+    .getPublicUrl(data.path);
+  return urlData.publicUrl;
+}
+
+async function noirUploadUserAvatar(file) {
+  if (!noirHasSupabase()) throw new Error('Supabase not configured');
+  const { data: { user } } = await window.db.auth.getUser();
+  if (!user) throw new Error('No authenticated user');
+  const path = `${user.id}/${Date.now()}-${file.name.replace(/\s+/g, '-')}`;
+  const { data, error } = await window.db.storage
+    .from('user-avatars')
+    .upload(path, file, { cacheControl: '3600', upsert: true });
+  if (error) throw error;
+  return data.path;
+}
+
+async function noirGetUserAvatarSignedUrl(path, expiresIn = 3600) {
+  if (!noirHasSupabase()) throw new Error('Supabase not configured');
+  if (!path) return '';
+  const { data, error } = await window.db.storage
+    .from('user-avatars')
+    .createSignedUrl(path, expiresIn);
+  if (error) throw error;
+  return data.signedUrl;
 }
 
 /* ---------- EXPORTS ---------- */
@@ -470,20 +564,26 @@ window.noirSaveProductToDB = noirSaveProductToDB;
 window.noirDeleteProductFromDB = noirDeleteProductFromDB;
 window.noirSaveBundleToDB = noirSaveBundleToDB;
 window.noirDeleteBundleFromDB = noirDeleteBundleFromDB;
+window.noirSaveHeroSlideToDB = noirSaveHeroSlideToDB;
+window.noirDeleteHeroSlideFromDB = noirDeleteHeroSlideFromDB;
 window.noirSaveOrderToDB = noirSaveOrderToDB;
 window.noirUpdateOrderStatusInDB = noirUpdateOrderStatusInDB;
 window.noirLoadAppSettings = noirLoadAppSettings;
 window.noirSaveAppSettings = noirSaveAppSettings;
 window.noirSaveCustomerToDB = noirSaveCustomerToDB;
 window.noirDEFAULT_SETTINGS = NOIR_DEFAULT_SETTINGS;
+window.noirUploadProductImage = noirUploadProductImage;
+window.noirUploadBundleImage = noirUploadBundleImage;
+window.noirUploadHeroVideo = noirUploadHeroVideo;
+window.noirUploadUserAvatar = noirUploadUserAvatar;
+window.noirGetUserAvatarSignedUrl = noirGetUserAvatarSignedUrl;
 
-/* ---------- AUTO-LOAD (no localStorage, no migration) ---------- */
+/* ---------- AUTO-LOAD ---------- */
 (async function autoLoad() {
   const run = async () => {
     await noirLoadAppSettings();
     await noirLoadFromSupabase();
   };
-
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', run);
   } else {
