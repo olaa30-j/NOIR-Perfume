@@ -124,6 +124,77 @@ function productCardHTML(p) {
 }
 
 /* ============================================================
+   HERO CAROUSEL
+   ============================================================ */
+function initHeroCarousel() {
+  const hero = document.querySelector('[data-hero-carousel]');
+  if (!hero) return;
+
+  const slides = Array.from(hero.querySelectorAll('.hero-slide'));
+  const dots   = Array.from(hero.querySelectorAll('[data-slide-to]'));
+  if (slides.length < 2 || dots.length === 0) return;
+
+  let current = 0;
+  let timer = null;
+  const AUTOPLAY_MS = 7000;
+
+  function goTo(index) {
+    if (index === current) return;
+    index = (index + slides.length) % slides.length;
+
+    slides.forEach((slide, i) => {
+      const isActive = i === index;
+      slide.hidden = !isActive;
+      slide.classList.toggle('is-active', isActive);
+    });
+    dots.forEach((dot, i) => {
+      const isActive = i === index;
+      dot.classList.toggle('active', isActive);
+      dot.setAttribute('aria-selected', String(isActive));
+    });
+
+    current = index;
+  }
+
+  function next() { goTo(current + 1); }
+
+  function startAutoplay() {
+    stopAutoplay();
+    timer = setInterval(next, AUTOPLAY_MS);
+  }
+  function stopAutoplay() {
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+
+  dots.forEach((dot, i) => {
+    dot.addEventListener('click', () => {
+      goTo(i);
+      startAutoplay(); // reset timer on manual interaction
+    });
+  });
+
+  // Pause autoplay when hero isn't visible or tab is hidden
+  hero.addEventListener('mouseenter', stopAutoplay);
+  hero.addEventListener('mouseleave', startAutoplay);
+  document.addEventListener('visibilitychange', () => {
+    document.hidden ? stopAutoplay() : startAutoplay();
+  });
+
+  // Keyboard: left/right arrows when dots are focused
+  hero.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft')  { goTo(current - 1); startAutoplay(); }
+    if (e.key === 'ArrowRight') { goTo(current + 1); startAutoplay(); }
+  });
+
+  // Respect reduced motion → no autoplay
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!prefersReduced) startAutoplay();
+}
+
+/* Run once layout is ready (matches the rest of your app.js pattern) */
+onLayoutReady(initHeroCarousel);
+
+/* ============================================================
    3. RENDERERS
    ============================================================ */
 function renderProducts(list) {

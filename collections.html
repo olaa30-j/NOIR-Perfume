@@ -3,13 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Your NOIR shopping bag.">
-  <title>Shopping bag — NOIR Arabian Luxury</title>
+  <meta name="description" content="Discover NOIR's curated fragrance bundles and gift sets.">
+  <title>Collections — NOIR Arabian Luxury</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&family=Inter:wght@400;500;600&family=Libre+Baskerville:wght@400;700&family=Manrope:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Global shared styles (theme, header, footer, buttons, keyframes) -->
   <link rel="stylesheet" href="css/styles.css">
+
+  <!-- Page-specific styles (collections feature rows) -->
+  <link rel="stylesheet" href="css/pages/collections.css">
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
@@ -19,7 +24,7 @@
   <script src="js/i18n.js" defer></script>
   <script src="js/theme.js" defer></script>
   <script src="js/auth.js" defer></script>
-  <script  type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js"></script>
   <script src="js/products.js" defer></script>
   <script src="js/cart.js" defer></script>
   <script type="module" src="js/components/index.js"></script>
@@ -31,14 +36,112 @@
   </div>
 
   <noir-layout>
-    <main>
-      <section class="story-section section-wrap">
-        <p class="eyebrow centered">Your selection</p>
-        <h2>Your bag is <em>waiting.</em></h2>
-        <p>Review your fragrances and continue when you are ready.</p>
-        <a href="shop.html" class="button button-gold">Continue shopping →</a>
+    <main class="collections-page">
+
+      <!-- HERO — shared .story-section pattern (same as shop.html / story.html) -->
+      <section class="story-section section-wrap" id="story">
+        <p class="eyebrow centered">Our collections</p>
+        <h2>Curated gift sets<br><em>for every moment.</em></h2>
+        <p>Hand-picked combinations of our finest fragrances — arranged with intent, priced with grace. Each bundle tells a story.</p>
+        <a href="shop.html" class="text-link">Explore fragrances <span>→</span></a>
       </section>
+
+      <!-- Bundle rows (rendered by inline script below) -->
+      <div id="collections-list" class="collection-list"></div>
+      <p id="collections-empty" class="collections-empty hidden">
+        No collections available right now.
+      </p>
     </main>
   </noir-layout>
+
+  <script>
+    (function () {
+      const esc = (s) => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      const money = (n) => '$' + (Math.round(Number(n) * 100) / 100).toFixed(2);
+      const pad2 = (n) => String(n).padStart(2, '0');
+
+      function getBundleProducts(bundle) {
+        const db = window.NOIR_DB || {};
+        const products = Array.isArray(db.products) ? db.products : [];
+        return (bundle.productIds || [])
+          .map(id => products.find(p => Number(p.id) === Number(id)))
+          .filter(Boolean);
+      }
+
+      function renderFeature(b, index) {
+        const items = getBundleProducts(b);
+        const original = items.reduce((s, p) => s + (Number(p.price) || 0), 0);
+        const price = Number(b.price) || 0;
+        const savings = original - price;
+
+        const bottles = items.slice(0, 4)
+          .map(p => `<div class="product-bottle ${esc(p.bottle || '')}"></div>`)
+          .join('');
+
+        const contents = items.map((p, i) => `
+          <div class="contents-row">
+            <span class="contents-index">${pad2(i + 1)}</span>
+            <span class="contents-name">${esc(p.name)}</span>
+            <span class="contents-price">${money(p.price)}</span>
+          </div>
+        `).join('');
+
+        return `
+          <article class="collection-feature" data-bundle-id="${b.id}">
+            <div class="collection-visual">
+              <span class="collection-number">${pad2(index + 1)}</span>
+              <div class="bottle-stack">${bottles}</div>
+            </div>
+
+            <div class="collection-body">
+              ${b.badge ? `<span class="collection-badge">${esc(b.badge)}</span>` : ''}
+              <h2 class="collection-title">${esc(b.name)}</h2>
+              ${b.description ? `<p class="collection-desc">${esc(b.description)}</p>` : ''}
+
+              ${items.length ? `<div class="collection-contents">${contents}</div>` : ''}
+
+              <div class="collection-footer">
+                <div class="price-block">
+                  <span class="price-main">${money(price)}</span>
+                  ${savings > 0.01
+                    ? `<span class="price-compare">${money(original)}</span>
+                       <span class="price-savings">Save ${money(savings)}</span>`
+                    : ''}
+                </div>
+                <button class="btn-add-bundle" data-add-bundle="${b.id}">
+                  Add to bag
+                </button>
+              </div>
+            </div>
+          </article>
+        `;
+      }
+
+      function renderCollections() {
+        const list  = document.getElementById('collections-list');
+        const empty = document.getElementById('collections-empty');
+        if (!list) return;
+
+        const bundles = (window.NOIR_DB && Array.isArray(window.NOIR_DB.bundles))
+          ? window.NOIR_DB.bundles.filter(b => b && b.active !== false)
+          : [];
+
+        if (!bundles.length) {
+          list.innerHTML = '';
+          if (empty) empty.classList.remove('hidden');
+          return;
+        }
+        if (empty) empty.classList.add('hidden');
+
+        list.innerHTML = bundles.map(renderFeature).join('');
+      }
+
+      document.addEventListener('DOMContentLoaded', renderCollections);
+      window.addEventListener('noir:data-ready', renderCollections);
+      window.addEventListener('noir:language', renderCollections);
+    })();
+  </script>
 </body>
 </html>

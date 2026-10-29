@@ -260,9 +260,9 @@ function renderSettingsAdmin() {
 
   return `<div class="admin-page-heading"><div><h2>Store settings</h2><p>Project identity, appearance, language and data — all saved to Supabase.</p></div></div>
 
-  <section class="admin-panel">
+  <section class="admin-panel" id="admin-store-form">
     <h3>Project identity</h3>
-    <div class="admin-product-form" style="grid-template-columns:1fr">
+    <div class="admin-product-form"  style="grid-template-columns:1fr">
       <label>Project name
         <input id="settings-project-name" type="text" value="${adminEsc(s.projectName || '')}" maxlength="80" placeholder="NOIR Arabian Perfumes">
       </label>
@@ -275,7 +275,7 @@ function renderSettingsAdmin() {
     </div>
   </section>
 
-  <section class="admin-panel">
+  <section class="admin-panel" id="admin-store-setting">
     <h3>Appearance</h3>
     <div class="admin-setting-row"><label for="admin-lang-select">Language</label>
       <select id="admin-lang-select" class="admin-search">
@@ -302,17 +302,6 @@ function renderSettingsAdmin() {
       ${dbReady ? 'Settings are stored in <code>public.site_settings</code> (row id=1).' : 'Supabase is not configured. Add URL and key in <code>js/config.js</code>.'}
     </div>
     <button class="button button-outline" id="admin-reload-data" style="margin-top:12px">Reload from database</button>
-  </section>
-
-  <section class="admin-panel">
-    <h3>About</h3>
-    <div class="settings-note">
-      <strong style="color:var(--gold-light)">Authentication</strong><br>
-      Roles are stored in the <code>customers</code> table. To grant admin access, run in the SQL editor:
-      <code style="display:block;margin-top:8px;padding:8px;background:rgba(0,0,0,.3);border-radius:4px;font-size:11px">update public.customers set role = 'admin' where email = 'you@example.com';</code>
-      <br><strong style="color:var(--gold-light)">Production</strong><br>
-      Add server-side validation and a payment provider before going live.
-    </div>
   </section>`;
 }
 

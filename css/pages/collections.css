@@ -1,0 +1,245 @@
+/* ============================================================
+   PAGE: collections.html
+   Scoped styles for the collections feature rows.
+   The page hero uses the shared .story-section pattern from
+   css/styles.css — nothing duplicated here.
+   ============================================================ */
+
+.collections-page {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 24px 24px 80px;
+}
+
+.collection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  margin-top: 40px;
+}
+
+.collection-feature {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  padding-bottom: 40px;
+  border-bottom: 1px solid rgba(200, 155, 85, 0.1);
+  align-items: stretch;
+}
+.collection-feature:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+@media (min-width: 860px) {
+  .collection-feature {
+    grid-template-columns: 3fr 4fr;
+    gap: 40px;
+    align-items: center;
+  }
+  .collection-feature:nth-child(even) .collection-visual { order: 2; }
+  .collection-feature:nth-child(even) .collection-body  { order: 1; }
+}
+
+.collection-visual {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(200, 155, 85, 0.18), transparent 60%),
+    linear-gradient(160deg, rgba(20, 26, 38, 0.9), rgba(8, 12, 20, 0.95));
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  max-height: 260px;
+}
+
+.collection-visual::before {
+  content: '';
+  position: absolute;
+  inset: 12px;
+  border: 1px solid rgba(200, 155, 85, 0.22);
+  pointer-events: none;
+}
+
+.collection-number {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 32px;
+  font-weight: 400;
+  color: rgba(200, 155, 85, 0.32);
+  line-height: 1;
+  z-index: 2;
+}
+
+.bottle-stack {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.bottle-stack .product-bottle {
+  position: absolute;
+  width: 52px;
+  height: 80px;
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.bottle-stack .product-bottle:nth-child(1) { transform: translateX(-44px) rotate(-9deg) scale(0.9); opacity: 0.85; }
+.bottle-stack .product-bottle:nth-child(2) { transform: translateX(-14px) scale(0.96); opacity: 0.95; z-index: 2; }
+.bottle-stack .product-bottle:nth-child(3) { transform: translateX(18px) scale(1.02); z-index: 3; }
+.bottle-stack .product-bottle:nth-child(4) { transform: translateX(50px) rotate(9deg) scale(0.9); opacity: 0.85; }
+.bottle-stack .product-bottle:nth-child(n+5) { display: none; }
+
+.collection-feature:hover .bottle-stack .product-bottle {
+  transform: translateX(0) rotate(0deg) scale(1);
+}
+
+.collection-body { display: flex; flex-direction: column; gap: 10px; }
+
+.collection-badge {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 4px 10px;
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--gold-light, #c89b55);
+  border: 1px solid rgba(200, 155, 85, 0.5);
+  border-radius: 999px;
+}
+
+.collection-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-weight: 400;
+  font-size: clamp(22px, 2.4vw, 32px);
+  line-height: 1.1;
+  margin: 0;
+  color: var(--text, #f5ead7);
+}
+
+.collection-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(245, 234, 215, 0.6);
+  margin: 0;
+  max-width: 520px;
+}
+
+.collection-contents {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgba(200, 155, 85, 0.15);
+  border-bottom: 1px solid rgba(200, 155, 85, 0.15);
+  margin: 6px 0;
+}
+
+.contents-row {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(200, 155, 85, 0.06);
+  font-size: 12px;
+  color: rgba(245, 234, 215, 0.8);
+}
+.contents-row:last-child { border-bottom: none; }
+
+.contents-index {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 13px;
+  color: rgba(200, 155, 85, 0.55);
+}
+.contents-name { font-weight: 500; }
+.contents-price {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  color: rgba(245, 234, 215, 0.45);
+}
+
+.collection-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 6px;
+}
+
+.price-block { display: flex; flex-direction: column; gap: 2px; }
+
+.price-main {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--text, #f5ead7);
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+.price-compare {
+  font-size: 11px;
+  color: rgba(245, 234, 215, 0.4);
+  text-decoration: line-through;
+}
+.price-savings {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold-light, #c89b55);
+}
+
+.btn-add-bundle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: transparent;
+  color: var(--gold-light, #c89b55);
+  border: 1px solid rgba(200, 155, 85, 0.55);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.btn-add-bundle:hover {
+  background: var(--gold-light, #c89b55);
+  color: #0a0f18;
+  border-color: var(--gold-light, #c89b55);
+}
+.btn-add-bundle::after {
+  content: '→';
+  font-size: 12px;
+  transition: transform 0.25s ease;
+}
+.btn-add-bundle:hover::after { transform: translateX(3px); }
+
+.collections-empty {
+  padding: 60px 20px;
+  text-align: center;
+  color: rgba(245, 234, 215, 0.4);
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .collections-page { padding: 16px 16px 40px; }
+  .collection-visual { aspect-ratio: 4 / 3; max-height: 200px; }
+  .collection-number { font-size: 24px; top: 10px; left: 12px; }
+  .bottle-stack .product-bottle { width: 42px; height: 64px; }
+  .collection-footer { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .btn-add-bundle { width: 100%; justify-content: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bottle-stack .product-bottle { transition: none; }
+}
