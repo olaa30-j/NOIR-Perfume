@@ -57,7 +57,7 @@
 
       function go(role) {
         if (next) { location.replace(decodeURIComponent(next)); return; }
-        location.replace('index.html');
+        location.replace(role === 'admin' ? 'admin.html' : 'index.html');
       }
 
       // Fast path: existing session in noirGetSession() (once supabase-client/auth has loaded).
