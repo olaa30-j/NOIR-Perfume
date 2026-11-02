@@ -262,3 +262,14 @@
   .product-badge { top: 8px; left: 8px; font-size: 7px; }
   .quick-view { display: none; }
 }
+
+.product-card .add-cart.is-locked,
+.bundle-card .button-gold.is-locked {
+  opacity: .5;
+  cursor: not-allowed;
+}
+.product-card .add-cart.is-locked:hover,
+.bundle-card .button-gold.is-locked:hover {
+  transform: none;
+  background: var(--gold);
+}

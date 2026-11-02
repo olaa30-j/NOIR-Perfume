@@ -9,6 +9,8 @@
    - Emits 'noir:cart-updated' on every change
    - Exposes getCartCountFromDB() so UI can read the count from
      Supabase directly (authoritative), instead of memory.
+   - Guests are blocked from adding to cart (products + bundles)
+     and are redirected to login.html?next=…
    ============================================================ */
 
 const NOIR_CART_DEBUG = /[?&]debug\b/.test(location.search);
@@ -53,6 +55,39 @@ function cartComputePrice(p) {
   if (!p) return 0;
   if (typeof window.noirComputePrice === 'function') return window.noirComputePrice(p);
   return Number(p.price) || 0;
+}
+
+/* ---------- AUTH GATE ---------- */
+/**
+ * Resolve current session (normalized). Returns null for guests.
+ * Cheap when noirGetSession() is available; falls back to db.auth.getUser().
+ */
+async function cartGetSession() {
+  if (typeof window.noirGetSession === 'function') {
+    try {
+      const s = await window.noirGetSession();
+      if (s && (s.userId || s.email)) return s;
+    } catch (e) { /* ignore */ }
+  }
+  if (window.db && window.db.auth) {
+    try {
+      const { data } = await window.db.auth.getUser();
+      const u = data && data.user;
+      if (u) {
+        return {
+          userId: u.id,
+          email: u.email || null,
+          role: u.app_metadata?.role || u.user_metadata?.role || 'customer',
+        };
+      }
+    } catch (e) { /* ignore */ }
+  }
+  return null;
+}
+
+function cartRequireLogin() {
+  const next = encodeURIComponent(location.pathname + location.search + location.hash);
+  window.location.href = 'login.html?next=' + next;
 }
 
 /* ---------- STATE ---------- */
@@ -220,6 +255,8 @@ async function persist() {
 
 /* ---------- CORE: ADD PRODUCT ---------- */
 async function addProductToCart(productId, qty) {
+  if (!(await cartGetSession())) { cartRequireLogin(); return; }
+
   const id = Number(productId);
   const quantity = Math.max(1, Number(qty) || 1);
   const product = cartGetProduct(id);
@@ -243,6 +280,8 @@ async function addProductToCart(productId, qty) {
 
 /* ---------- CORE: ADD BUNDLE ---------- */
 async function addBundleToCart(bundleId, qty) {
+  if (!(await cartGetSession())) { cartRequireLogin(); return; }
+
   const id = Number(bundleId);
   const quantity = Math.max(1, Number(qty) || 1);
   const bundle = cartGetBundle(id);
@@ -493,6 +532,11 @@ Object.defineProperty(window, 'noirCart', {
    DELEGATED CLICKS
    data-cart-minus / data-cart-plus / data-cart-remove
    accept either "product:12" / "bundle:3" or bare "12" (product).
+
+   `data-add-to-cart` and `data-add-bundle` are gated behind login
+   below. app.js also has a gate, but this is the safety net so the
+   rule holds even if cart.js is loaded without app.js (admin pages,
+   standalone product pages, etc.).
    ============================================================ */
 function parseLineKey(key) {
   const s = String(key || '');
@@ -505,12 +549,18 @@ document.addEventListener('click', async function (e) {
   try {
     const addBtn = e.target.closest('[data-add-to-cart]');
     if (addBtn) {
+      if (addBtn.disabled) return;
+      e.preventDefault();
+      if (!(await cartGetSession())) { cartRequireLogin(); return; }
       await addProductToCart(Number(addBtn.dataset.addToCart), 1);
       return;
     }
 
     const bundleBtn = e.target.closest('[data-add-bundle]');
     if (bundleBtn) {
+      if (bundleBtn.disabled) return;
+      e.preventDefault();
+      if (!(await cartGetSession())) { cartRequireLogin(); return; }
       await addBundleToCart(Number(bundleBtn.dataset.addBundle), 1);
       return;
     }
@@ -556,7 +606,7 @@ async function initCart() {
   }
   window.addEventListener('noir:auth-changed', () => syncForUser());
 
-  cartLog('cart.js initialized (one-row-per-user, items jsonb, backend count ready)');
+  cartLog('cart.js initialized (one-row-per-user, items jsonb, backend count ready, login-gated add)');
 }
 
 if (document.readyState === 'loading') {

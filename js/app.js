@@ -26,8 +26,6 @@ function showToast(msg) {
   clearTimeout(showToast._t);
   showToast._t = setTimeout(() => toast.classList.remove('show'), 2600);
 }
-// app.js is an ES module, so its functions are private unless exposed — cart.js, checkout.js,
-// notifications.js and theme.js call showToast(), and previously never found it.
 window.showToast = showToast;
 window.escapeHTML = escapeHTML;
 
@@ -43,6 +41,57 @@ function getProductById(id) { return typeof noirGetProduct === 'function' ? noir
 function getBundleById(id) { return typeof noirGetBundle === 'function' ? noirGetBundle(id) : null; }
 function isImageUrl(value) {
   return typeof value === 'string' && /^(https?:\/\/|\/)/.test(value);
+}
+
+/* ============================================================
+   AUTH GATE
+   ============================================================ */
+let __noirSession = null;
+
+async function resolveSession() {
+  if (typeof window.noirGetSession === 'function') {
+    try {
+      const s = await window.noirGetSession();
+      if (s && (s.userId || s.email)) return s;
+    } catch (e) { /* ignore */ }
+  }
+  if (window.db && window.db.auth) {
+    try {
+      const { data } = await window.db.auth.getUser();
+      const u = data && data.user;
+      if (u) {
+        return {
+          userId: u.id,
+          email: u.email || null,
+          role: u.app_metadata?.role || u.user_metadata?.role || 'customer',
+        };
+      }
+    } catch (e) { /* ignore */ }
+  }
+  return null;
+}
+
+function syncAddLocks() {
+  const locked = !__noirSession;
+  document.querySelectorAll('[data-add-to-cart], [data-add-bundle]').forEach(b => {
+    b.classList.toggle('is-locked', locked);
+    b.setAttribute('aria-disabled', String(locked));
+    if (locked) b.setAttribute('title', t('product.signInToAdd') || 'Sign in to add to bag');
+    else b.removeAttribute('title');
+  });
+}
+
+async function refreshSession() {
+  __noirSession = await resolveSession();
+  syncAddLocks();
+}
+
+window.addEventListener('noir:auth-changed', refreshSession);
+window.addEventListener('noir:session-ready', refreshSession);
+if (window.db && window.db.auth && window.db.auth.onAuthStateChange) {
+  try {
+    window.db.auth.onAuthStateChange(() => refreshSession());
+  } catch (e) { /* ignore */ }
 }
 
 /* ============================================================
@@ -76,6 +125,7 @@ function productCardHTML(p) {
   const price = computePrice(p);
   const hasOffer = !!p.offer;
   const isBest = !!p.bestSeller;
+  const isOut = Number.isFinite(p.stock) && p.stock <= 0;
 
   const visual = isImageUrl(p.bottle)
     ? '<img class="product-image" src="' + escapeHTML(p.bottle) + '" alt="' + escapeHTML(loc(p, 'name')) + '" loading="lazy">'
@@ -96,7 +146,7 @@ function productCardHTML(p) {
       '<div class="product-bottom"><div>' +
         '<span class="product-price">' + money(price) + '</span>' +
         (hasOffer ? '<span class="product-price-old">' + money(p.price) + '</span>' : '') +
-      '</div><button class="add-cart" data-add-to-cart="' + p.id + '" aria-label="' + t('product.addToCart') + '"' + (p.stock <= 0 ? ' disabled title="' + t('product.outOfStock') + '"' : '') + '>+</button></div>' +
+      '</div><button class="add-cart" data-add-to-cart="' + p.id + '" aria-label="' + t('product.addToCart') + '"' + (isOut ? ' disabled title="' + t('product.outOfStock') + '"' : '') + '>+</button></div>' +
     '</div>' +
   '</article>';
 }
@@ -217,6 +267,7 @@ function renderProducts(list) {
   grid.innerHTML = source.map(productCardHTML).join('');
   const empty = $('#empty-state');
   if (empty) empty.classList.toggle('hidden', source.length > 0);
+  syncAddLocks();
 }
 
 function renderBestSellers() {
@@ -228,6 +279,7 @@ function renderBestSellers() {
   if (!list.length) { section.hidden = true; return; }
   section.hidden = false;
   grid.innerHTML = list.map(productCardHTML).join('');
+  syncAddLocks();
 }
 
 function bundleCardHTML(bundle) {
@@ -255,6 +307,7 @@ function renderBundles() {
   if (!active.length) { section.hidden = true; return; }
   section.hidden = false;
   grid.innerHTML = active.map(bundleCardHTML).join('');
+  syncAddLocks();
 }
 
 function renderOffers() {
@@ -265,6 +318,7 @@ function renderOffers() {
   if (!list.length) { section.hidden = true; return; }
   section.hidden = false;
   grid.innerHTML = list.map(productCardHTML).join('');
+  syncAddLocks();
 }
 
 function noirRenderAll() {
@@ -386,6 +440,41 @@ onLayoutReady(function () {
 });
 
 /* ============================================================
+   7b. ADD-TO-CART GATE (signed-in only) — products + bundles
+   ============================================================ */
+onLayoutReady(function () {
+  try {
+    document.addEventListener('click', async function (e) {
+      const addBtn    = e.target.closest('[data-add-to-cart]');
+      const bundleBtn = e.target.closest('[data-add-bundle]');
+      if (!addBtn && !bundleBtn) return;
+
+      const btn = addBtn || bundleBtn;
+      e.preventDefault();
+
+      // 1) Auth check
+      let session = __noirSession;
+      if (session === null) session = await resolveSession();
+      if (!session) {
+        const next = encodeURIComponent(location.pathname + location.search + location.hash);
+        window.location.href = 'login.html?next=' + next;
+        return;
+      }
+
+      // 2) Signed in — let the cart module handle the actual add.
+      if (addBtn) {
+        const id = Number(addBtn.getAttribute('data-add-to-cart'));
+        if (typeof window.addProductToCart === 'function') await window.addProductToCart(id, 1);
+        else if (typeof window.addToCart === 'function') await window.addToCart(id, 1);
+      } else if (bundleBtn) {
+        const id = Number(bundleBtn.getAttribute('data-add-bundle'));
+        if (typeof window.addBundleToCart === 'function') await window.addBundleToCart(id, 1);
+      }
+    });
+  } catch (e) { console.error('[app.js] add-to-cart gate init failed:', e); }
+});
+
+/* ============================================================
    8. Sign out
    ============================================================ */
 document.addEventListener('DOMContentLoaded', function () {
@@ -399,6 +488,8 @@ document.addEventListener('DOMContentLoaded', function () {
   } catch (e) { console.error('[app.js] signout init failed:', e); }
 });
 
-/* initial render when layout ready — covers data that arrived before the listeners existed
-   (fast connection / cache), which previously left the product grids empty */
-onLayoutReady(noirRenderAll);
+/* initial render + session warm-up when layout ready */
+onLayoutReady(async function () {
+  await refreshSession();
+  noirRenderAll();
+});

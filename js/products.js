@@ -51,8 +51,6 @@ window.addEventListener('noir:language', function () {
   }
 });
 
-/* ✅ بعد أي إضافة للسلة، أعد رندر الشبكة (لتحديث الـ badges)
-   + أطلق noir:cart-updated (لو مش cart.js اللي عملها) */
 window.addEventListener('noir:cart-updated', function () {
   pLog('cart updated — badge should refresh automatically via site-header');
 });

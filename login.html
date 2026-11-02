@@ -26,7 +26,7 @@
   <script src="js/bag.js" defer></script>
   <script src="js/ui-enhance.js" defer></script>
   <script src="js/auth.js" defer></script>
-  <script  type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js"></script>
   <script src="js/cart.js" defer></script>
   <script src="js/checkout.js" defer></script>
   <script type="module" src="js/components/index.js"></script>
@@ -42,6 +42,55 @@
   </style>
 </head>
 <body>
+  <!-- ============================================================
+       FAST REDIRECT — if the visitor is already signed in, skip
+       the login UI entirely. Runs before the loader paints.
+       Kept inline so it doesn't depend on any deferred script.
+       ============================================================ -->
+  <script>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var next = params.get('next');
+      var target = next
+        ? decodeURIComponent(next)
+        : 'index.html';
+
+      function go(role) {
+        if (next) { location.replace(decodeURIComponent(next)); return; }
+        location.replace(role === 'admin' ? 'admin.html' : 'index.html');
+      }
+
+      // Fast path: existing session in noirGetSession() (once supabase-client/auth has loaded).
+      window.addEventListener('noir:session-ready', function (e) {
+        var s = e && e.detail;
+        if (s && (s.userId || s.email)) go(s.role);
+      });
+      window.addEventListener('noir:auth-changed', async function () {
+        try {
+          var s = typeof window.noirGetSession === 'function' ? await window.noirGetSession() : null;
+          if (s && (s.userId || s.email)) go(s.role);
+        } catch (err) { /* ignore */ }
+      });
+
+      // Belt-and-suspenders: check Supabase directly once it's on window.
+      function trySupabase() {
+        if (!(window.db && window.db.auth)) return;
+        window.db.auth.getSession().then(function (res) {
+          var session = res && res.data && res.data.session;
+          if (session && session.user) {
+            var role = (session.user.app_metadata && session.user.app_metadata.role)
+                    || (session.user.user_metadata && session.user.user_metadata.role)
+                    || 'customer';
+            go(role);
+          }
+        }).catch(function () { /* ignore */ });
+      }
+      if (window.db && window.db.auth) trySupabase();
+      else document.addEventListener('DOMContentLoaded', trySupabase);
+      setTimeout(trySupabase, 400); // last-ditch after deferred scripts
+    })();
+  </script>
+
   <div id="noir-loader" class="noir-loader" role="status" aria-live="polite">
     <div class="noir-loader-spinner"></div>
     <p class="noir-loader-text">Loading NOIR…</p>
