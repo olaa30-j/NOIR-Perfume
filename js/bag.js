@@ -82,12 +82,7 @@
       '<button type="button" class="button button-gold button-full" data-checkout>' + esc(T('cart.checkout')) + ' →</button>' +
       (variant === 'drawer'
         ? '<a class="bag-view-link" href="cart.html" data-cart-link>' + esc(T('cart.pageTitle')) + ' →</a>'
-        : '<a class="bag-view-link" href="shop.html">← ' + esc(T('cart.continue')) + '</a>') +
-      '<ul class="bag-perks">' +
-        '<li>🔒 ' + esc(T('cart.perk.secure')) + '</li>' +
-        '<li>💵 ' + esc(T('cart.perk.cod')) + '</li>' +
-        '<li>📦 ' + esc(T('cart.perk.track')) + '</li>' +
-      '</ul>';
+        : '<a class="bag-view-link" href="shop.html">← ' + esc(T('cart.continue')) + '</a>');
   }
 
   window.noirBagHTML = function (opts) {

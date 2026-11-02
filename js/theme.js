@@ -1,72 +1,41 @@
 /* ============================================================
-   THEME CUSTOMIZER — DB-first + loading screen
+   THEME CUSTOMIZER — DB-only source of truth + loading screen
    - Source of truth: Supabase (NOIR_DB.settings) — set by the admin
    - Loading screen shows until DB responds (or 8s timeout)
-   - localStorage cache is applied UNDER the loading screen so the
-     loader / fallback state already wears the last known theme
-   - Visitors may pick their own preset (noir-visitor-theme); it only
-     overrides the store theme for that visitor, never the DB
+   - No localStorage cache, no per-visitor override:
+     the store theme from the backend is the ONLY theme.
    ============================================================ */
 (function initThemeCustomizer() {
-    const STORAGE = 'noir-theme-prefs'; // cache only
-
     const PRESETS = {
         midnight: { bg: '#07111c', text: '#f5ead7', accent: '#c89b55', serif: 'Cormorant Garamond', sans: 'DM Sans', label: 'Midnight' },
-        aurora: { bg: '#0b0a1a', text: '#eae7f7', accent: '#8b7fd4', serif: 'Playfair Display', sans: 'Inter', label: 'Aurora' },
-        emerald: { bg: '#06120d', text: '#e8f5ec', accent: '#4fae7a', serif: 'Cormorant Garamond', sans: 'DM Sans', label: 'Emerald' },
-        crimson: { bg: '#12060a', text: '#f7e8ec', accent: '#c4506a', serif: 'Playfair Display', sans: 'Inter', label: 'Crimson' },
-        sapphire: { bg: '#060d1f', text: '#e6edfb', accent: '#5b9bd5', serif: 'Playfair Display', sans: 'Inter', label: 'Sapphire' },
-        oud: { bg: '#130c07', text: '#f3e6d6', accent: '#d08a3e', serif: 'Libre Baskerville', sans: 'Manrope', label: 'Oud' },
-        onyx: { bg: '#0a0a0b', text: '#ededee', accent: '#c7c9cf', serif: 'Playfair Display', sans: 'Inter', label: 'Onyx' },
-        ivory: { bg: '#f6f2ea', text: '#2a2418', accent: '#a67c3a', serif: 'Cormorant Garamond', sans: 'DM Sans', label: 'Ivory' },
-        rose: { bg: '#faf1ee', text: '#3a2226', accent: '#b5586b', serif: 'Playfair Display', sans: 'Inter', label: 'Rosé' },
-        sand: { bg: '#efe3cc', text: '#2b2417', accent: '#9a5b2c', serif: 'Libre Baskerville', sans: 'Manrope', label: 'Sand' },
+        aurora:   { bg: '#0b0a1a', text: '#eae7f7', accent: '#8b7fd4', serif: 'Playfair Display',   sans: 'Inter', label: 'Aurora' },
+        emerald:  { bg: '#06120d', text: '#e8f5ec', accent: '#4fae7a', serif: 'Cormorant Garamond', sans: 'DM Sans', label: 'Emerald' },
+        crimson:  { bg: '#12060a', text: '#f7e8ec', accent: '#c4506a', serif: 'Playfair Display',   sans: 'Inter', label: 'Crimson' },
+        sapphire: { bg: '#060d1f', text: '#e6edfb', accent: '#5b9bd5', serif: 'Playfair Display',   sans: 'Inter', label: 'Sapphire' },
+        oud:      { bg: '#130c07', text: '#f3e6d6', accent: '#d08a3e', serif: 'Libre Baskerville',  sans: 'Manrope', label: 'Oud' },
+        onyx:     { bg: '#0a0a0b', text: '#ededee', accent: '#c7c9cf', serif: 'Playfair Display',   sans: 'Inter', label: 'Onyx' },
+        ivory:    { bg: '#f6f2ea', text: '#2a2418', accent: '#a67c3a', serif: 'Cormorant Garamond', sans: 'DM Sans', label: 'Ivory' },
+        rose:     { bg: '#faf1ee', text: '#3a2226', accent: '#b5586b', serif: 'Playfair Display',   sans: 'Inter', label: 'Rosé' },
+        sand:     { bg: '#efe3cc', text: '#2b2417', accent: '#9a5b2c', serif: 'Libre Baskerville',  sans: 'Manrope', label: 'Sand' },
     };
 
-    const VISITOR_KEY = 'noir-visitor-theme';
     const HEX_RE = /^#[0-9a-f]{6}$/i;
-    const IS_ADMIN_PAGE = () => !!document.getElementById('admin-app');
 
     const FONT_PAIRS = [
-        { id: 'classic', serif: 'Cormorant Garamond', sans: 'DM Sans', label: 'Classic', sub: 'Cormorant + DM Sans' },
-        { id: 'editorial', serif: 'Playfair Display', sans: 'Inter', label: 'Editorial', sub: 'Playfair + Inter' },
-        { id: 'modern', serif: 'Libre Baskerville', sans: 'Manrope', label: 'Modern', sub: 'Baskerville + Manrope' },
+        { id: 'classic',   serif: 'Cormorant Garamond', sans: 'DM Sans',  label: 'Classic',   sub: 'Cormorant + DM Sans' },
+        { id: 'editorial', serif: 'Playfair Display',   sans: 'Inter',    label: 'Editorial', sub: 'Playfair + Inter' },
+        { id: 'modern',    serif: 'Libre Baskerville',  sans: 'Manrope',  label: 'Modern',    sub: 'Baskerville + Manrope' },
     ];
 
     const DEFAULT = { ...PRESETS.midnight, preset: 'midnight', fontPair: 'classic' };
 
-    // DB is the source of truth. The cache is only used for the very first
-    // paint (hidden behind the loader) and is always overridden by the DB.
+    // DB is the source of truth. `prefs` is only the in-memory working copy
+    // used for painting and for the admin customizer form.
     let prefs = { ...DEFAULT };
     let dbLoaded = false;
 
-    function readCache() {
-        try {
-            const c = JSON.parse(localStorage.getItem(STORAGE) || 'null');
-            if (c && HEX_RE.test(c.bg) && HEX_RE.test(c.text) && HEX_RE.test(c.accent)
-                && typeof c.serif === 'string' && typeof c.sans === 'string') {
-                return c;
-            }
-        } catch (e) { /* ignore */ }
-        return null;
-    }
-
-    function readVisitorTheme() {
-        if (IS_ADMIN_PAGE()) return null;
-        try {
-            const id = localStorage.getItem(VISITOR_KEY);
-            return id && PRESETS[id] ? id : null;
-        } catch (e) { return null; }
-    }
-
-    /* ---------- Cache (write-only, لتحسين الأداء) ---------- */
-    function writeCache() {
-        try { localStorage.setItem(STORAGE, JSON.stringify(prefs)); } catch (e) { }
-    }
-
-    /* ---------- Save (DB + cache) ---------- */
+    /* ---------- Save (DB only) ---------- */
     function save() {
-        writeCache();
         if (typeof noirSaveAppSettings !== 'function') {
             console.warn('[theme] noirSaveAppSettings not available');
             return;
@@ -88,7 +57,7 @@
 
         noirSaveAppSettings(payload).catch(err => {
             console.warn('[theme] DB save failed:', err);
-            if (typeof showToast === 'function') showToast('Theme saved locally — DB error');
+            if (typeof showToast === 'function') showToast('Theme could not be saved to DB');
         });
     }
 
@@ -192,11 +161,11 @@
     // When Supabase isn't configured at all there is nothing to wait for.
     const noBackend = !window.db;
     let loaderFallbackTimer = setTimeout(function () {
-        console.warn('[theme] DB timeout (8s) — hiding loader');
+        console.warn('[theme] DB timeout — hiding loader');
         hideLoader();
     }, noBackend ? 700 : 8000);
 
-    /* ---------- DB → prefs (المصدر الرسمي) ---------- */
+    /* ---------- DB → prefs (المصدر الوحيد) ---------- */
     function applyFromDB() {
         const s = (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) || {};
 
@@ -214,23 +183,18 @@
         if (s.textColor) prefs.text = s.textColor;
         if (s.accentColor) prefs.accent = s.accentColor;
 
-        // 3) visitor's own pick wins on the storefront (never in admin)
-        const visitor = readVisitorTheme();
-        if (visitor) prefs = { ...prefs, ...PRESETS[visitor], preset: visitor };
-
         apply(true);
 
         if (typeof s.radius === 'number') applyRadius(s.radius);
 
         dbLoaded = true;
-        if (!visitor) writeCache();
 
         // ✅ DB وصل — اخفي اللودر
         clearTimeout(loaderFallbackTimer);
         hideLoader();
     }
 
-    /* ---------- UI ---------- */
+    /* ---------- UI (admin only) ---------- */
     function buildUI() {
         if (document.getElementById('theme-customizer')) return;
         if (!document.getElementById('admin-app')) return;
@@ -370,7 +334,6 @@
             prefs.radius = r;
             if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) NOIR_DB.settings.radius = r;
             applyRadius(r);
-            writeCache();
 
             clearTimeout(radiusSaveTimer);
             radiusSaveTimer = setTimeout(async () => {
@@ -378,7 +341,7 @@
                     try { await noirSaveAppSettings({ radius: r }); }
                     catch (err) {
                         console.warn('[theme] radius DB save failed:', err);
-                        if (typeof showToast === 'function') showToast('Radius saved locally — DB error');
+                        if (typeof showToast === 'function') showToast('Radius could not be saved to DB');
                     }
                 }
             }, 300);
@@ -435,29 +398,6 @@
     window.addEventListener('noir:settings-ready', applyFromDB);
     window.addEventListener('noir:radius-change', (e) => applyRadius(e.detail));
 
-    // First paint: last known theme (cache) or the visitor's pick, under the loader
-    (function earlyPaint() {
-        const visitor = readVisitorTheme();
-        const cached = readCache();
-        if (visitor) prefs = { ...prefs, ...PRESETS[visitor], preset: visitor };
-        else if (cached) prefs = { ...prefs, ...cached };
-        apply();
-    })();
-
-    /* ---------- Visitor override ---------- */
-    function setVisitorTheme(id) {
-        if (!PRESETS[id]) return false;
-        try { localStorage.setItem(VISITOR_KEY, id); } catch (e) { }
-        prefs = { ...prefs, ...PRESETS[id], preset: id };
-        apply(true);
-        return true;
-    }
-    function clearVisitorTheme() {
-        try { localStorage.removeItem(VISITOR_KEY); } catch (e) { }
-        prefs = { ...DEFAULT };
-        applyFromDB(); // falls back to the store theme from the DB
-    }
-
     // لو DB سبق ووصل (unlikely)، طبّق فورًا
     if (window.__noirSettingsReady) {
         applyFromDB();
@@ -480,9 +420,6 @@
         applyRadius,
         applyFromDB,
         hideLoader,
-        setVisitorTheme,
-        clearVisitorTheme,
-        get visitorTheme() { return readVisitorTheme(); },
         get prefs() { return prefs; },
         get isFromDB() { return dbLoaded; },
         PRESETS,

@@ -5,6 +5,15 @@
    in-memory fallback via getCartCount().
    ============================================================ */
 
+const ICON = {
+  menu: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>`,
+  search: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>`,
+  user: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c1.2-3.6 4.2-5.5 7.5-5.5s6.3 1.9 7.5 5.5"/></svg>`,
+  admin: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 2.5v5.6c0 4.2-2.9 7.5-7 9.4-4.1-1.9-7-5.2-7-9.4V5.5L12 3z"/><path d="M9.3 12.2l2 2 3.5-3.8"/></svg>`,
+  bag: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8h12l-1 11.5a1.5 1.5 0 0 1-1.5 1.4h-7A1.5 1.5 0 0 1 7 19.5L6 8z"/><path d="M9.2 8V6.8a2.8 2.8 0 0 1 5.6 0V8"/></svg>`,
+  arrowRight: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>`,
+};
+
 class SiteHeader extends HTMLElement {
   connectedCallback() {
     this.innerHTML = `
@@ -17,7 +26,7 @@ class SiteHeader extends HTMLElement {
           <span>NOIR</span><small>ARABIAN PERFUMES</small>
         </a>
         <button class="icon-button menu-toggle" id="menu-toggle"
-                aria-label="Toggle navigation" aria-expanded="false">☰</button>
+                aria-label="Toggle navigation" aria-expanded="false">${ICON.menu}</button>
         <nav class="main-nav" id="main-nav" aria-label="Main navigation">
           <a href="index.html" data-i18n="nav.home">Home</a>
           <a href="shop.html" data-i18n="nav.shop">Shop</a>
@@ -25,24 +34,22 @@ class SiteHeader extends HTMLElement {
           <a href="story.html" data-i18n="nav.story">Our story</a>
         </nav>
         <div class="header-actions">
-          <button class="icon-button" id="search-toggle" aria-label="Search products">⌕</button>
-
-          <button class="icon-button lang-toggle" id="lang-toggle" type="button"
-                  data-i18n="lang.toggle" aria-label="Switch language">العربية</button>
+          <button class="icon-button" id="search-toggle" aria-label="Search products">${ICON.search}</button>
 
           <div data-notifs></div>
 
-          <button class="icon-button" id="account-button" aria-label="Open account">
-            <span id="account-icon">♙</span>
+          <button class="icon-button account-button" id="account-button" data-role="guest" aria-label="Open account">
+            <span class="account-icon account-icon--guest" data-account-icon="user">${ICON.user}</span>
+            <span class="account-icon account-icon--admin hidden" data-account-icon="admin">${ICON.admin}</span>
             <span id="account-badge" class="account-badge hidden"></span>
           </button>
 
           <button class="icon-button cart-trigger" id="cart-open" aria-label="Open shopping bag">
-            ♧ <span class="cart-count" id="cart-count">0</span>
+            ${ICON.bag}<span class="cart-count" id="cart-count">0</span>
           </button>
 
           <button class="icon-button checkout-quick hidden" id="checkout-quick"
-                  aria-label="Quick checkout" title="Checkout">→</button>
+                  aria-label="Quick checkout" title="Checkout">${ICON.arrowRight}</button>
         </div>
       </header>
     `;
@@ -89,13 +96,6 @@ class SiteHeader extends HTMLElement {
       }
     });
 
-    /* ---- language toggle (visitor choice, remembered in this browser) ---- */
-    this.querySelector('#lang-toggle').addEventListener('click', () => {
-      const next = (typeof window.noirLang === 'function' ? window.noirLang() : 'en') === 'ar' ? 'en' : 'ar';
-      if (typeof window.noirSetLang === 'function') window.noirSetLang(next);
-    });
-    if (typeof window.noirTranslate === 'function') window.noirTranslate();
-
     /* ---- announcement follows the free-shipping threshold from settings ---- */
     this._syncAnnounce = () => {
       const el = this.querySelector('[data-announce]');
@@ -106,7 +106,6 @@ class SiteHeader extends HTMLElement {
     };
     this._syncAnnounce();
     window.addEventListener('noir:settings-ready', this._syncAnnounce);
-    window.addEventListener('noir:language', this._syncAnnounce);
 
     /* ---- notifications bell ---- */
     if (window.noirNotifs) window.noirNotifs.mount(this.querySelector('[data-notifs]'));
@@ -145,7 +144,6 @@ class SiteHeader extends HTMLElement {
 
   disconnectedCallback() {
     window.removeEventListener('noir:settings-ready', this._syncAnnounce);
-    window.removeEventListener('noir:language', this._syncAnnounce);
     window.removeEventListener('noir:cart-updated', this._onCartUpdate);
     window.removeEventListener('noir:data-ready', this._onCartUpdate);
     window.removeEventListener('noir:auth-changed', this._onAuthChanged);
@@ -283,28 +281,33 @@ class SiteHeader extends HTMLElement {
 
   async updateAccountUI() {
     const session = await this._getSession();
-    const iconEl = this.querySelector('#account-icon');
-    const badgeEl = this.querySelector('#account-badge');
     const accountBtn = this.querySelector('#account-button');
+    const guestIcon = this.querySelector('[data-account-icon="user"]');
+    const adminIcon = this.querySelector('[data-account-icon="admin"]');
+    const badgeEl = this.querySelector('#account-badge');
 
     if (session) {
       const isAdmin = session.role === 'admin';
-      if (iconEl) iconEl.textContent = isAdmin ? '🛡' : '👤';
       if (accountBtn) {
         accountBtn.setAttribute('aria-label', isAdmin ? 'Open admin panel' : 'Open account');
         accountBtn.classList.add('is-logged-in');
+        accountBtn.dataset.role = isAdmin ? 'admin' : 'customer';
       }
+      if (guestIcon) guestIcon.classList.toggle('hidden', isAdmin);
+      if (adminIcon) adminIcon.classList.toggle('hidden', !isAdmin);
       if (badgeEl) {
         badgeEl.classList.remove('hidden');
         badgeEl.classList.toggle('is-admin', isAdmin);
         badgeEl.textContent = '';
       }
     } else {
-      if (iconEl) iconEl.textContent = '♙';
       if (accountBtn) {
         accountBtn.setAttribute('aria-label', 'Log in');
         accountBtn.classList.remove('is-logged-in');
+        accountBtn.dataset.role = 'guest';
       }
+      if (guestIcon) guestIcon.classList.remove('hidden');
+      if (adminIcon) adminIcon.classList.add('hidden');
       if (badgeEl) badgeEl.classList.add('hidden');
     }
 
