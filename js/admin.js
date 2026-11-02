@@ -6,6 +6,8 @@ let activePanel = 'overview';
 let _adminSaving = false;
 let _ordersFilter = { q: '', status: 'all' };
 let _openOrderId = null;
+let _adminVerified = false;
+let _adminSession = null;
 
 const ADMIN_TR = () => window.noirOrderTracker;
 const ADMIN_STATUSES = ['Processing', 'Confirmed', 'Preparing', 'Shipped', 'Delivered', 'Cancelled'];
@@ -41,12 +43,14 @@ function adminDB() {
    SESSION
    ============================================================ */
 async function adminCheckSession() {
-  if (!window.db || !window.db.auth) return null;
-  if (typeof noirGetSession !== 'function') return null;
+  // No Supabase / no helper → treat as unauthenticated
+  if (!window.db || !window.db.auth) return { status: 'no-db' };
+  if (typeof noirGetSession !== 'function') return { status: 'no-helper' };
+
   const session = await noirGetSession();
-  if (!session) return null;
-  if (session.role !== 'admin') return null;
-  return session;
+  if (!session) return { status: 'anonymous' };
+  if (session.role !== 'admin') return { status: 'forbidden', session };
+  return { status: 'ok', session };
 }
 
 function adminUpdateTopbar(session) {
@@ -67,6 +71,11 @@ async function adminSignOut() {
    ROUTER
    ============================================================ */
 function renderAdmin(panel) {
+  if (!_adminVerified) {
+    const el = document.getElementById('admin-content');
+    if (el) el.innerHTML = '<div class="admin-empty">Admin authentication required…</div>';
+    return;
+  }
   if (!panel) panel = activePanel || 'overview';
   activePanel = panel;
   const titles = {
@@ -216,6 +225,7 @@ function adminNextStatus(status) {
 }
 
 async function adminShowOrder(id) {
+  if (!_adminVerified) return;
   const o = adminDB().orders.find(x => x.id === id);
   const drawer = document.getElementById('order-drawer');
   if (!o || !drawer) return;
@@ -284,6 +294,7 @@ function orderDrawerHTML(o, events) {
 }
 
 async function adminApplyStatus(id, status, note) {
+  if (!_adminVerified) return;
   if (!noirHasSupabase()) { adminToast('❌ Supabase not configured.'); return; }
   try {
     await noirUpdateOrderStatusInDB(id, status, note);
@@ -301,6 +312,7 @@ async function adminApplyStatus(id, status, note) {
 async function updateOrderStatus(id, status) { return adminApplyStatus(id, status, null); }
 
 async function adminApplyPayment(id, status) {
+  if (!_adminVerified) return;
   try {
     await noirSetPaymentStatusInDB(id, status);
     await noirRefreshStoreData();
@@ -417,6 +429,7 @@ function renderHeroAdmin() {
 }
 
 function showHeroForm(slide = null) {
+  if (!_adminVerified) return;
   const panel = document.getElementById('hero-form-panel');
   if (!panel) return;
   panel.classList.remove('hidden');
@@ -439,6 +452,7 @@ function showHeroForm(slide = null) {
 }
 
 async function saveHeroSlide(form) {
+  if (!_adminVerified) return;
   _adminSaving = true;
   try {
     const data = new FormData(form);
@@ -554,6 +568,7 @@ function renderSettingsAdmin() {
 }
 
 async function saveSettingsField(patch) {
+  if (!_adminVerified) return;
   if (!noirHasSupabase()) { adminToast('❌ Supabase not configured.'); return; }
   try {
     await noirSaveAppSettings(patch);
@@ -567,6 +582,7 @@ async function saveSettingsField(patch) {
    PRODUCT FORM
    ============================================================ */
 function showProductForm(product = null) {
+  if (!_adminVerified) return;
   const panel = document.getElementById('product-form-panel');
   if (!panel) return;
   panel.classList.remove('hidden');
@@ -587,6 +603,7 @@ function showProductForm(product = null) {
 }
 
 async function saveAdminProduct(form) {
+  if (!_adminVerified) return;
   _adminSaving = true;
   try {
     const data = new FormData(form);
@@ -649,6 +666,7 @@ async function saveAdminProduct(form) {
    BUNDLE FORM
    ============================================================ */
 function showBundleForm(bundle = null) {
+  if (!_adminVerified) return;
   const panel = document.getElementById('bundle-form-panel');
   if (!panel) return;
   panel.classList.remove('hidden');
@@ -673,6 +691,7 @@ function showBundleForm(bundle = null) {
 }
 
 async function saveBundle(form) {
+  if (!_adminVerified) return;
   _adminSaving = true;
   try {
     const data = new FormData(form);
@@ -722,6 +741,7 @@ async function saveBundle(form) {
    PDF EXPORTS
    ============================================================ */
 function adminPdf(kind, extra) {
+  if (!_adminVerified) return;
   const db = adminDB();
   const today = new Date().toLocaleDateString('en-GB', { dateStyle: 'long' });
   if (kind === 'products') {
@@ -778,6 +798,7 @@ function adminPdf(kind, extra) {
 }
 
 function adminInvoicePdf(id) {
+  if (!_adminVerified) return;
   const o = adminDB().orders.find(x => x.id === id);
   if (!o) return;
   adminExportPDF({
@@ -803,6 +824,7 @@ document.addEventListener('DOMContentLoaded', function () {
   if (!adminContent) return;
 
   adminContent.addEventListener('click', async function (event) {
+    if (!_adminVerified) return;
     if (event.target.closest('#show-product-form')) { event.preventDefault(); showProductForm(); return; }
     if (event.target.closest('#cancel-product-form')) { document.getElementById('product-form-panel')?.classList.add('hidden'); return; }
     if (event.target.closest('#show-bundle-form')) { event.preventDefault(); showBundleForm(); return; }
@@ -913,6 +935,7 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('order-drawer-backdrop')?.addEventListener('click', adminCloseOrder);
   if (drawer) {
     drawer.addEventListener('click', async (event) => {
+      if (!_adminVerified) return;
       if (event.target.closest('[data-close-order]')) { adminCloseOrder(); return; }
       const adv = event.target.closest('[data-advance]');
       if (adv) { adv.disabled = true; await adminApplyStatus(adv.dataset.advance, adv.dataset.next, null); return; }
@@ -933,15 +956,19 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && _openOrderId) adminCloseOrder(); });
-  window.addEventListener('noir:open-order', (e) => { renderAdmin('orders'); adminShowOrder(e.detail.id); });
+  window.addEventListener('noir:open-order', (e) => {
+    if (!_adminVerified) return;
+    renderAdmin('orders');
+    adminShowOrder(e.detail.id);
+  });
   window.addEventListener('noir:notification', async () => {
-    // a new order / payment arrived: refresh the data (not while saving a form)
-    if (_adminSaving) return;
+    if (_adminSaving || !_adminVerified) return;
     try { await noirRefreshStoreData(); } catch (e) { /* ignore */ }
     if (_openOrderId) adminShowOrder(_openOrderId);
   });
 
   adminContent.addEventListener('input', function (event) {
+    if (!_adminVerified) return;
     if (event.target.id === 'admin-product-search') {
       const q = event.target.value.toLowerCase();
       const list = adminDB().products.filter(p => `${p.name} ${p.category}`.toLowerCase().includes(q));
@@ -959,6 +986,7 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   adminContent.addEventListener('change', function (event) {
+    if (!_adminVerified) return;
     if (event.target.id === 'admin-lang-select') return saveSettingsField({ language: event.target.value });
     if (event.target.id === 'admin-theme-select') return saveSettingsField({ theme: event.target.value });
     if (event.target.id === 'admin-radius-input') return saveSettingsField({ radius: Number(event.target.value) });
@@ -973,16 +1001,36 @@ window.addEventListener('noir:data-ready', function (e) {
     if (source === 'supabase') { dot.style.background = '#4fae7a'; label.textContent = 'Connected to Supabase'; }
     else { dot.style.background = '#c89b55'; label.textContent = 'Local mode (offline)'; }
   }
-  if (_adminSaving) return;
+  if (_adminSaving || !_adminVerified) return;
   if (typeof renderAdmin === 'function' && document.getElementById('admin-app')) renderAdmin(activePanel);
 });
 
 /* BOOT */
 (function bootAdmin() {
   const run = async () => {
-    const session = await adminCheckSession();
+    const result = await adminCheckSession();
+
+    // Not signed in (or missing DB/helpers) → login page
+    if (result.status === 'anonymous' || result.status === 'no-db' || result.status === 'no-helper') {
+      adminUpdateTopbar(null);
+      location.replace('login.html?role=admin&next=admin.html');
+      return;
+    }
+
+    // Signed in but NOT an admin → back to the storefront
+    if (result.status === 'forbidden') {
+      adminUpdateTopbar(result.session);
+      adminToast('❌ Admin access required. Redirecting…');
+      setTimeout(() => location.replace('index.html'), 800);
+      return;
+    }
+
+    // OK — real admin
+    const session = result.session;
+    _adminVerified = true;
+    _adminSession = session;
     adminUpdateTopbar(session);
-    if (!session) { location.replace('login.html?role=admin&next=admin.html'); return; }
+
     if (window.noirNotifs) window.noirNotifs.mount(document.querySelector('[data-notifs]'));
     const m = /order=([^&]+)/.exec(location.hash || '');
     if (m) { activePanel = 'orders'; }

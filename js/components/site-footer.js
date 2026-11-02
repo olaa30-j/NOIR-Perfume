@@ -20,7 +20,6 @@ class SiteFooter extends HTMLElement {
         <div>
           <h3>Follow our story</h3>
           <p>Instagram &nbsp; Pinterest &nbsp; TikTok</p>
-          <button class="text-link admin-link" id="admin-open">Admin ↗</button>
         </div>
         <p class="copyright">© 2026 NOIR Arabian Perfumes.</p>
       </footer>
