@@ -26,11 +26,18 @@ function showToast(msg) {
   clearTimeout(showToast._t);
   showToast._t = setTimeout(() => toast.classList.remove('show'), 2600);
 }
+// app.js is an ES module, so its functions are private unless exposed — cart.js, checkout.js,
+// notifications.js and theme.js call showToast(), and previously never found it.
+window.showToast = showToast;
+window.escapeHTML = escapeHTML;
+
 function noirDB() {
   if (typeof window.NOIR_DB !== 'undefined' && window.NOIR_DB) return window.NOIR_DB;
   return { products: [], bundles: [], orders: [], customers: [], heroSlides: [], settings: { language: 'en', radius: 6 } };
 }
-function t(key) { return typeof noirT === 'function' ? noirT(key) : key; }
+function t(key, vars) { return typeof noirT === 'function' ? noirT(key, vars) : key; }
+function loc(obj, field) { return typeof noirLocalize === 'function' ? noirLocalize(obj, field) : (obj && obj[field]) || ''; }
+function catLabel(c) { return typeof noirCategory === 'function' ? noirCategory(c) : c; }
 function computePrice(p) { return typeof noirComputePrice === 'function' ? noirComputePrice(p) : (p && p.price) || 0; }
 function getProductById(id) { return typeof noirGetProduct === 'function' ? noirGetProduct(id) : null; }
 function getBundleById(id) { return typeof noirGetBundle === 'function' ? noirGetBundle(id) : null; }
@@ -53,7 +60,7 @@ onLayoutReady(function () {
     }
     const langSel = $('#lang-select');
     if (langSel && typeof NOIR_DB !== 'undefined') {
-      langSel.value = NOIR_DB.settings.language || 'en';
+      langSel.value = (typeof noirLang === 'function' ? noirLang() : NOIR_DB.settings.language) || 'en';
       langSel.addEventListener('change', function () {
         if (typeof noirSetLang === 'function') noirSetLang(langSel.value);
       });
@@ -71,25 +78,25 @@ function productCardHTML(p) {
   const isBest = !!p.bestSeller;
 
   const visual = isImageUrl(p.bottle)
-    ? '<img class="product-image" src="' + escapeHTML(p.bottle) + '" alt="' + escapeHTML(p.name) + '" loading="lazy">'
+    ? '<img class="product-image" src="' + escapeHTML(p.bottle) + '" alt="' + escapeHTML(loc(p, 'name')) + '" loading="lazy">'
     : '<div class="product-bottle ' + escapeHTML(p.bottle || '') + '"></div>';
 
   return '<article class="product-card" data-product-id="' + p.id + '">' +
     '<div class="product-visual">' +
-      (p.badge ? '<span class="product-badge">' + escapeHTML(p.badge) + '</span>' : '') +
-      (hasOffer ? '<span class="product-badge offer" style="top:' + (p.badge ? '48px' : '12px') + '">' + escapeHTML(p.offer.label || 'Sale') + '</span>' : '') +
+      (p.badge ? '<span class="product-badge">' + escapeHTML(loc(p, 'badge')) + '</span>' : '') +
+      (hasOffer ? '<span class="product-badge offer" style="top:' + (p.badge ? '48px' : '12px') + '">' + escapeHTML(p.offer.label || t('product.save')) + '</span>' : '') +
       (isBest && !hasOffer ? '<span class="product-badge best" style="top:' + (p.badge ? '48px' : '12px') + '">⭐</span>' : '') +
       visual +
       '<div class="quick-view"><button class="button button-outline" data-quick-view="' + p.id + '">' + t('product.quickView') + '</button></div>' +
     '</div>' +
     '<div class="product-info">' +
-      '<p class="product-category">' + escapeHTML(p.category) + '</p>' +
-      '<h3>' + escapeHTML(p.name) + '</h3>' +
-      '<p class="product-subtitle">' + escapeHTML(p.subtitle) + '</p>' +
+      '<p class="product-category">' + escapeHTML(catLabel(p.category)) + '</p>' +
+      '<h3>' + escapeHTML(loc(p, 'name')) + '</h3>' +
+      '<p class="product-subtitle">' + escapeHTML(loc(p, 'subtitle')) + '</p>' +
       '<div class="product-bottom"><div>' +
         '<span class="product-price">' + money(price) + '</span>' +
         (hasOffer ? '<span class="product-price-old">' + money(p.price) + '</span>' : '') +
-      '</div><button class="add-cart" data-add-to-cart="' + p.id + '" aria-label="' + t('product.addToCart') + '">+</button></div>' +
+      '</div><button class="add-cart" data-add-to-cart="' + p.id + '" aria-label="' + t('product.addToCart') + '"' + (p.stock <= 0 ? ' disabled title="' + t('product.outOfStock') + '"' : '') + '>+</button></div>' +
     '</div>' +
   '</article>';
 }
@@ -227,16 +234,16 @@ function bundleCardHTML(bundle) {
   if (!bundle) return '';
   const items = (bundle.productIds || []).map(getProductById).filter(Boolean);
   const image = isImageUrl(bundle.bottle)
-    ? '<img class="bundle-image" src="' + escapeHTML(bundle.bottle) + '" alt="' + escapeHTML(bundle.name) + '" loading="lazy">'
+    ? '<img class="bundle-image" src="' + escapeHTML(bundle.bottle) + '" alt="' + escapeHTML(loc(bundle, 'name')) + '" loading="lazy">'
     : '';
   return '<article class="bundle-card">' +
     image +
-    (bundle.badge ? '<span class="bundle-badge">' + escapeHTML(bundle.badge) + '</span>' : '') +
-    '<h3 class="bundle-title">' + escapeHTML(bundle.name) + '</h3>' +
-    '<p class="bundle-desc">' + escapeHTML(bundle.description || '') + '</p>' +
-    '<div class="bundle-products">' + items.map(p => '<span>' + escapeHTML(p.name) + '</span>').join('') + '</div>' +
+    (bundle.badge ? '<span class="bundle-badge">' + escapeHTML(loc(bundle, 'badge')) + '</span>' : '') +
+    '<h3 class="bundle-title">' + escapeHTML(loc(bundle, 'name')) + '</h3>' +
+    '<p class="bundle-desc">' + escapeHTML(loc(bundle, 'description')) + '</p>' +
+    '<div class="bundle-products">' + items.map(p => '<span>' + escapeHTML(loc(p, 'name')) + '</span>').join('') + '</div>' +
     '<div class="bundle-foot"><span class="bundle-price">' + money(bundle.price) + '</span>' +
-    '<button class="button button-gold" data-add-bundle="' + bundle.id + '">Add bundle</button></div>' +
+    '<button class="button button-gold" data-add-bundle="' + bundle.id + '">' + t('product.addBundle') + '</button></div>' +
   '</article>';
 }
 
@@ -286,7 +293,7 @@ onLayoutReady(function () {
       const q   = (search && search.value || '').toLowerCase().trim();
       const cat = (category && category.value) || 'all';
       const s   = (sort && sort.value) || 'featured';
-      if (q) list = list.filter(p => (p.name + ' ' + p.category + ' ' + p.subtitle).toLowerCase().indexOf(q) !== -1);
+      if (q) list = list.filter(p => (p.name + ' ' + (p.nameAr || '') + ' ' + p.category + ' ' + catLabel(p.category) + ' ' + p.subtitle + ' ' + (p.subtitleAr || '')).toLowerCase().indexOf(q) !== -1);
       if (cat !== 'all') list = list.filter(p => p.category === cat);
       if (s === 'low')  list.sort((a, b) => computePrice(a) - computePrice(b));
       if (s === 'high') list.sort((a, b) => computePrice(b) - computePrice(a));
@@ -310,10 +317,6 @@ window.addEventListener('noir:settings-ready', function (e) {
   try {
     const settings = e.detail;
     if (!settings) return;
-    if (settings.language) {
-      document.documentElement.lang = settings.language;
-      document.documentElement.dir = settings.language === 'ar' ? 'rtl' : 'ltr';
-    }
     if (settings.projectName) {
       const first = settings.projectName.trim().split(/\s+/)[0];
       document.querySelectorAll('.brand span').forEach(el => { el.textContent = first; });
@@ -326,10 +329,6 @@ window.addEventListener('noir:settings-ready', function (e) {
 
 if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) {
   const s = NOIR_DB.settings;
-  if (s.language) {
-    document.documentElement.lang = s.language;
-    document.documentElement.dir = s.language === 'ar' ? 'rtl' : 'ltr';
-  }
   if (s.projectName) {
     const first = s.projectName.trim().split(/\s+/)[0];
     document.querySelectorAll('.brand span').forEach(el => { el.textContent = first; });
@@ -346,7 +345,7 @@ onLayoutReady(function () {
   try {
     const form = $('#newsletter-form');
     if (form) form.addEventListener('submit', function (e) {
-      e.preventDefault(); showToast('Thanks for subscribing!'); form.reset();
+      e.preventDefault(); showToast(t('newsletter.thanks')); form.reset();
     });
   } catch (e) { console.error('[app.js] newsletter init failed:', e); }
 });
@@ -400,5 +399,6 @@ document.addEventListener('DOMContentLoaded', function () {
   } catch (e) { console.error('[app.js] signout init failed:', e); }
 });
 
-/* initial render when layout ready (in case data arrives before listener) */
-onLayoutReady(renderHeroSlides);
+/* initial render when layout ready — covers data that arrived before the listeners existed
+   (fast connection / cache), which previously left the product grids empty */
+onLayoutReady(noirRenderAll);

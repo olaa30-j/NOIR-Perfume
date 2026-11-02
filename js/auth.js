@@ -6,7 +6,8 @@
    ============================================================ */
 
 /* ---------- DEBUG LOGGER ---------- */
-const NOIR_DEBUG = true;
+// Verbose logging is opt-in: add ?debug to the URL or set localStorage 'noir-debug' = '1'
+const NOIR_DEBUG = /[?&]debug\b/.test(location.search) || (function () { try { return localStorage.getItem('noir-debug') === '1'; } catch (e) { return false; } })();
 
 function noirLog(...args) {
   if (NOIR_DEBUG) console.log('%c[NOIR AUTH]', 'color:#c89b55;font-weight:bold', ...args);

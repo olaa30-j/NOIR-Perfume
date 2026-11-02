@@ -151,30 +151,71 @@ function noirApplyLanguageFonts(lang) {
 
 /* ============================================================
    LANGUAGE API
+   - Store default language comes from the DB (admin setting).
+   - A visitor can pick their own language (header toggle); it is kept in
+     localStorage 'noir-visitor-lang' and wins on the storefront (never in admin).
    ============================================================ */
-function noirSetLang(lang) {
+const NOIR_VISITOR_LANG_KEY = 'noir-visitor-lang';
+
+function noirIsAdminPage() { return !!document.getElementById('admin-app'); }
+
+function noirVisitorLang() {
+  if (noirIsAdminPage()) return null;
+  try {
+    const v = localStorage.getItem(NOIR_VISITOR_LANG_KEY);
+    return v && NOIR_I18N[v] ? v : null;
+  } catch (e) { return null; }
+}
+
+/** Active language: visitor choice → store default → 'en' */
+function noirLang() {
+  return noirVisitorLang()
+    || (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings && NOIR_DB.settings.language)
+    || 'en';
+}
+
+function noirApplyLang(lang) {
   if (!NOIR_I18N[lang]) lang = 'en';
-
-  NOIR_DB.settings.language = lang;
-  if (typeof noirStoreSave === 'function') noirStoreSave(NOIR_DB);
-
   document.documentElement.lang = lang;
   document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
-
-  // Apply fonts for the chosen language
   noirApplyLanguageFonts(lang);
-
-  // Translate DOM
   noirTranslate();
-
-  // Notify listeners (e.g. re-render product grids, admin panels)
   window.dispatchEvent(new CustomEvent('noir:language', { detail: { lang } }));
 }
 
-function noirT(key) {
-  const lang = (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings.language) || 'en';
-  const dict = NOIR_I18N[lang] || NOIR_I18N.en;
-  return dict[key] || NOIR_I18N.en[key] || key;
+function noirSetLang(lang) {
+  if (!NOIR_I18N[lang]) lang = 'en';
+  if (noirIsAdminPage()) {
+    NOIR_DB.settings.language = lang;      // admin edits the store default
+  } else {
+    try { localStorage.setItem(NOIR_VISITOR_LANG_KEY, lang); } catch (e) { /* ignore */ }
+  }
+  noirApplyLang(lang);
+}
+
+/** Translate a key; `{name}` placeholders are filled from `vars`. */
+function noirT(key, vars) {
+  const dict = NOIR_I18N[noirLang()] || NOIR_I18N.en;
+  let str = dict[key] || NOIR_I18N.en[key] || key;
+  if (vars) str = str.replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? vars[k] : m));
+  return str;
+}
+
+/** Localized field of a product/bundle/order line: noirLocalize(p, 'name') → nameAr in Arabic. */
+function noirLocalize(obj, field) {
+  if (!obj) return '';
+  if (noirLang() === 'ar') {
+    const ar = obj[field + 'Ar'];
+    if (ar) return ar;
+  }
+  return obj[field] || '';
+}
+
+/** Product category label (Oud → عود). */
+function noirCategory(cat) {
+  const key = 'cat.' + cat;
+  const dict = NOIR_I18N[noirLang()] || {};
+  return dict[key] || cat || '';
 }
 
 function noirTranslate() {
@@ -194,8 +235,7 @@ function noirTranslate() {
    AUTO-INIT
    ============================================================ */
 (function initI18n() {
-  const lang =
-    (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings.language) || 'en';
+  const lang = noirLang();
 
   document.documentElement.lang = lang;
   document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
@@ -210,10 +250,16 @@ function noirTranslate() {
     noirTranslate();
   }
 
+  // The DB (store default) arrives after first paint — re-resolve the language
+  window.addEventListener('noir:settings-ready', () => {
+    const l = noirLang();
+    if (l !== document.documentElement.lang) noirApplyLang(l);
+  });
+
   // Re-apply the current language fonts whenever the theme changes
   // (because theme may reset --font-serif / --font-sans)
   window.addEventListener('noir:theme', () => {
-    noirApplyLanguageFonts(NOIR_DB.settings.language || 'en');
+    noirApplyLanguageFonts(noirLang());
   });
 })();
 
@@ -221,6 +267,10 @@ function noirTranslate() {
    EXPORTS
    ============================================================ */
 window.noirSetLang = noirSetLang;
+window.noirLang = noirLang;
+window.noirLocalize = noirLocalize;
+window.noirCategory = noirCategory;
+window.NOIR_I18N = NOIR_I18N;
 window.noirT = noirT;
 window.noirTranslate = noirTranslate;
 window.noirApplyLanguageFonts = noirApplyLanguageFonts;

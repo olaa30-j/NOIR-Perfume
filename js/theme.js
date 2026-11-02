@@ -1,9 +1,11 @@
 /* ============================================================
    THEME CUSTOMIZER — DB-first + loading screen
-   - Source of truth: Supabase (NOIR_DB.settings)
+   - Source of truth: Supabase (NOIR_DB.settings) — set by the admin
    - Loading screen shows until DB responds (or 8s timeout)
-   - No localStorage read on first paint (avoids flash)
-   - localStorage is used ONLY as a write-through cache
+   - localStorage cache is applied UNDER the loading screen so the
+     loader / fallback state already wears the last known theme
+   - Visitors may pick their own preset (noir-visitor-theme); it only
+     overrides the store theme for that visitor, never the DB
    ============================================================ */
 (function initThemeCustomizer() {
     const STORAGE = 'noir-theme-prefs'; // cache only
@@ -13,8 +15,17 @@
         aurora: { bg: '#0b0a1a', text: '#eae7f7', accent: '#8b7fd4', serif: 'Playfair Display', sans: 'Inter', label: 'Aurora' },
         emerald: { bg: '#06120d', text: '#e8f5ec', accent: '#4fae7a', serif: 'Cormorant Garamond', sans: 'DM Sans', label: 'Emerald' },
         crimson: { bg: '#12060a', text: '#f7e8ec', accent: '#c4506a', serif: 'Playfair Display', sans: 'Inter', label: 'Crimson' },
+        sapphire: { bg: '#060d1f', text: '#e6edfb', accent: '#5b9bd5', serif: 'Playfair Display', sans: 'Inter', label: 'Sapphire' },
+        oud: { bg: '#130c07', text: '#f3e6d6', accent: '#d08a3e', serif: 'Libre Baskerville', sans: 'Manrope', label: 'Oud' },
+        onyx: { bg: '#0a0a0b', text: '#ededee', accent: '#c7c9cf', serif: 'Playfair Display', sans: 'Inter', label: 'Onyx' },
         ivory: { bg: '#f6f2ea', text: '#2a2418', accent: '#a67c3a', serif: 'Cormorant Garamond', sans: 'DM Sans', label: 'Ivory' },
+        rose: { bg: '#faf1ee', text: '#3a2226', accent: '#b5586b', serif: 'Playfair Display', sans: 'Inter', label: 'Rosé' },
+        sand: { bg: '#efe3cc', text: '#2b2417', accent: '#9a5b2c', serif: 'Libre Baskerville', sans: 'Manrope', label: 'Sand' },
     };
+
+    const VISITOR_KEY = 'noir-visitor-theme';
+    const HEX_RE = /^#[0-9a-f]{6}$/i;
+    const IS_ADMIN_PAGE = () => !!document.getElementById('admin-app');
 
     const FONT_PAIRS = [
         { id: 'classic', serif: 'Cormorant Garamond', sans: 'DM Sans', label: 'Classic', sub: 'Cormorant + DM Sans' },
@@ -24,10 +35,29 @@
 
     const DEFAULT = { ...PRESETS.midnight, preset: 'midnight', fontPair: 'classic' };
 
-    // مفيش قراءة من localStorage في البداية — DEFAULT فقط.
-    // DB هو المصدر، واللودر مخفي لحد ما DB يوصل.
+    // DB is the source of truth. The cache is only used for the very first
+    // paint (hidden behind the loader) and is always overridden by the DB.
     let prefs = { ...DEFAULT };
     let dbLoaded = false;
+
+    function readCache() {
+        try {
+            const c = JSON.parse(localStorage.getItem(STORAGE) || 'null');
+            if (c && HEX_RE.test(c.bg) && HEX_RE.test(c.text) && HEX_RE.test(c.accent)
+                && typeof c.serif === 'string' && typeof c.sans === 'string') {
+                return c;
+            }
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    function readVisitorTheme() {
+        if (IS_ADMIN_PAGE()) return null;
+        try {
+            const id = localStorage.getItem(VISITOR_KEY);
+            return id && PRESETS[id] ? id : null;
+        } catch (e) { return null; }
+    }
 
     /* ---------- Cache (write-only, لتحسين الأداء) ---------- */
     function writeCache() {
@@ -73,6 +103,33 @@
         return (r * 299 + g * 587 + b * 114) / 1000 > 140;
     }
 
+    // Readable text colour for anything painted with the accent
+    // (buttons, badges). Uses WCAG relative luminance.
+    function relLuminance(hex) {
+        const c = hex.replace('#', '');
+        const ch = [0, 2, 4].map((i) => {
+            const v = parseInt(c.substr(i, 2), 16) / 255;
+            return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+    }
+    function contrastRatio(a, b) {
+        const l1 = relLuminance(a), l2 = relLuminance(b);
+        return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+    }
+    function onAccentFor(accent, bg, text) {
+        if (!HEX_RE.test(accent)) return bg;
+        const candidates = [bg, text, '#0b0b0b', '#ffffff'].filter((c) => HEX_RE.test(c));
+        return candidates.reduce((best, c) =>
+            contrastRatio(accent, c) > contrastRatio(accent, best) ? c : best, candidates[0]);
+    }
+
+    // Which font-pair button matches the current serif/sans combo
+    function pairIdFor(serif, sans) {
+        const m = FONT_PAIRS.find((f) => f.serif === serif && f.sans === sans);
+        return m ? m.id : null;
+    }
+
     const loadedFonts = new Set();
     function loadFont(name) {
         if (!name || loadedFonts.has(name)) return;
@@ -84,9 +141,17 @@
         document.head.appendChild(link);
     }
 
-    function apply() {
+    let transitionTimer = null;
+    function apply(animate) {
         const root = document.documentElement;
+        if (animate === true) {
+            root.classList.add('theme-transition');
+            clearTimeout(transitionTimer);
+            transitionTimer = setTimeout(() => root.classList.remove('theme-transition'), 600);
+        }
+        prefs.fontPair = pairIdFor(prefs.serif, prefs.sans);
         root.style.setProperty('--bg', prefs.bg);
+        root.style.setProperty('--on-accent', onAccentFor(prefs.accent, prefs.bg, prefs.text));
         root.style.setProperty('--text', prefs.text);
         root.style.setProperty('--accent', prefs.accent);
         root.style.setProperty('--font-serif', `"${prefs.serif}"`);
@@ -97,6 +162,13 @@
             root.removeAttribute('data-theme');
         }
         root.style.colorScheme = isLightColor(prefs.bg) ? 'light only' : 'dark only';
+        let meta = document.querySelector('meta[name="theme-color"]');
+        if (!meta) {
+            meta = document.createElement('meta');
+            meta.name = 'theme-color';
+            document.head.appendChild(meta);
+        }
+        meta.content = prefs.bg;
         loadFont(prefs.serif);
         loadFont(prefs.sans);
         window.dispatchEvent(new CustomEvent('noir:theme'));
@@ -116,17 +188,19 @@
         }
     }
 
-    // fallback: لو DB ماوصلش في 8 ثواني، نخفي اللودر
+    // Fallback: if the DB never answers, don't trap the visitor behind the loader.
+    // When Supabase isn't configured at all there is nothing to wait for.
+    const noBackend = !window.db;
     let loaderFallbackTimer = setTimeout(function () {
         console.warn('[theme] DB timeout (8s) — hiding loader');
         hideLoader();
-    }, 8000);
+    }, noBackend ? 700 : 8000);
 
     /* ---------- DB → prefs (المصدر الرسمي) ---------- */
     function applyFromDB() {
         const s = (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) || {};
 
-        // 1) preset
+        // 1) preset (store-wide theme chosen by the admin)
         if (s.theme && PRESETS[s.theme]) {
             prefs = { ...prefs, ...PRESETS[s.theme], preset: s.theme };
         } else if (s.theme === 'custom') {
@@ -140,12 +214,16 @@
         if (s.textColor) prefs.text = s.textColor;
         if (s.accentColor) prefs.accent = s.accentColor;
 
-        apply();
+        // 3) visitor's own pick wins on the storefront (never in admin)
+        const visitor = readVisitorTheme();
+        if (visitor) prefs = { ...prefs, ...PRESETS[visitor], preset: visitor };
+
+        apply(true);
 
         if (typeof s.radius === 'number') applyRadius(s.radius);
 
         dbLoaded = true;
-        writeCache();
+        if (!visitor) writeCache();
 
         // ✅ DB وصل — اخفي اللودر
         clearTimeout(loaderFallbackTimer);
@@ -229,6 +307,7 @@
             b.style.setProperty('--p-bg', p.bg);
             b.style.setProperty('--p-accent', p.accent);
             b.title = p.label;
+            b.setAttribute('aria-label', p.label + ' theme');
             b.addEventListener('click', () => {
                 prefs = { ...prefs, ...p, preset: id };
                 if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings) {
@@ -239,7 +318,7 @@
                     NOIR_DB.settings.textColor = p.text;
                     NOIR_DB.settings.accentColor = p.accent;
                 }
-                apply(); save(); syncUI();
+                apply(true); save(); syncUI();
             });
             presetBox.appendChild(b);
         });
@@ -343,7 +422,9 @@
             el.textContent = prefs[el.dataset.hex];
         });
         panel.querySelectorAll('.tc-preset').forEach((el) => {
-            el.classList.toggle('active', el.dataset.preset === prefs.preset);
+            const on = el.dataset.preset === prefs.preset;
+            el.classList.toggle('active', on);
+            el.setAttribute('aria-pressed', String(on));
         });
         panel.querySelectorAll('.tc-font-btn').forEach((el) => {
             el.classList.toggle('active', el.dataset.font === prefs.fontPair);
@@ -354,8 +435,31 @@
     window.addEventListener('noir:settings-ready', applyFromDB);
     window.addEventListener('noir:radius-change', (e) => applyRadius(e.detail));
 
+    // First paint: last known theme (cache) or the visitor's pick, under the loader
+    (function earlyPaint() {
+        const visitor = readVisitorTheme();
+        const cached = readCache();
+        if (visitor) prefs = { ...prefs, ...PRESETS[visitor], preset: visitor };
+        else if (cached) prefs = { ...prefs, ...cached };
+        apply();
+    })();
+
+    /* ---------- Visitor override ---------- */
+    function setVisitorTheme(id) {
+        if (!PRESETS[id]) return false;
+        try { localStorage.setItem(VISITOR_KEY, id); } catch (e) { }
+        prefs = { ...prefs, ...PRESETS[id], preset: id };
+        apply(true);
+        return true;
+    }
+    function clearVisitorTheme() {
+        try { localStorage.removeItem(VISITOR_KEY); } catch (e) { }
+        prefs = { ...DEFAULT };
+        applyFromDB(); // falls back to the store theme from the DB
+    }
+
     // لو DB سبق ووصل (unlikely)، طبّق فورًا
-    if (typeof NOIR_DB !== 'undefined' && NOIR_DB.settings && NOIR_DB.settings.theme) {
+    if (window.__noirSettingsReady) {
         applyFromDB();
     }
 
@@ -376,6 +480,9 @@
         applyRadius,
         applyFromDB,
         hideLoader,
+        setVisitorTheme,
+        clearVisitorTheme,
+        get visitorTheme() { return readVisitorTheme(); },
         get prefs() { return prefs; },
         get isFromDB() { return dbLoaded; },
         PRESETS,

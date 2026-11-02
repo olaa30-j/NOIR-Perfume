@@ -10,6 +10,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&family=Inter:wght@400;500;600&family=Libre+Baskerville:wght@400;700&family=Manrope:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
+
+  <link rel="stylesheet" href="css/pages/commerce.css">
   <link rel="stylesheet" href="css/pages/admin.css">
 
   <!-- Supabase SDK -->
@@ -24,6 +26,11 @@
   <!-- i18n + theme + auth -->
   <script src="js/i18n.js" defer></script>
   <script src="js/theme.js" defer></script>
+  <script src="js/i18n-extra.js" defer></script>
+  <script src="js/order-tracker.js" defer></script>
+  <script src="js/notifications.js" defer></script>
+  <script src="js/admin-extra.js" defer></script>
+  <script src="js/ui-enhance.js" defer></script>
   <script src="js/auth.js" defer></script>
 
   <!-- UI + admin (admin.js contains bootAdmin) -->
@@ -63,6 +70,9 @@
           <p class="eyebrow">NOIR / MANAGEMENT</p>
           <h1 id="admin-title">Overview</h1>
         </div>
+        <div class="admin-tools">
+          <div data-notifs></div>
+        </div>
         <div class="admin-profile">
           <span class="avatar">N</span>
           <span id="admin-name">Loading session…<br><small>—</small></span>
@@ -72,6 +82,12 @@
       <div class="admin-content" id="admin-content"></div>
     </div>
   </section>
+
+  <div class="order-drawer-backdrop" id="order-drawer-backdrop"></div>
+  <aside class="order-drawer" id="order-drawer" aria-hidden="true" aria-label="Order details">
+    <button class="drawer-close" type="button" data-close-order aria-label="Close">×</button>
+    <div class="drawer-body"></div>
+  </aside>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>

@@ -11,7 +11,7 @@
      Supabase directly (authoritative), instead of memory.
    ============================================================ */
 
-const NOIR_CART_DEBUG = true;
+const NOIR_CART_DEBUG = /[?&]debug\b/.test(location.search);
 
 function cartLog(...args) {
   if (NOIR_CART_DEBUG) console.log('%c[CART]', 'color:#4fae7a;font-weight:bold', ...args);
@@ -30,6 +30,8 @@ function cartEsc(str) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+function cartT(key, vars) { return typeof window.noirT === 'function' ? window.noirT(key, vars) : key; }
+function cartLoc(o, f) { return typeof window.noirLocalize === 'function' ? window.noirLocalize(o, f) : (o && o[f]) || ''; }
 function cartMoney(n) {
   return '$' + (Math.round(Number(n) * 100) / 100).toFixed(2);
 }
@@ -222,6 +224,11 @@ async function addProductToCart(productId, qty) {
   const quantity = Math.max(1, Number(qty) || 1);
   const product = cartGetProduct(id);
   if (!product) { cartWarn('addProductToCart: not found:', id); return; }
+  const inBag = (NOIR_CART.find(it => it.type === 'product' && it.id === id) || {}).qty || 0;
+  if (Number.isFinite(product.stock) && inBag + quantity > product.stock) {
+    if (typeof showToast === 'function') showToast(cartT(product.stock > 0 ? 'err.stock' : 'product.outOfStock', { name: cartLoc(product, 'name') }));
+    return;
+  }
 
   const existing = NOIR_CART.find(it => it.type === 'product' && it.id === id);
   if (existing) existing.qty += quantity;
@@ -229,7 +236,7 @@ async function addProductToCart(productId, qty) {
 
   emitCartUpdate();
   cartLog('Added product:', product.name, '| lines:', NOIR_CART.length);
-  if (typeof showToast === 'function') showToast(product.name + ' added to bag');
+  if (typeof showToast === 'function') showToast(cartT('cart.added', { name: cartLoc(product, 'name') }));
 
   await persist();
 }
@@ -247,7 +254,7 @@ async function addBundleToCart(bundleId, qty) {
 
   emitCartUpdate();
   cartLog('Added bundle:', bundle.name, '| lines:', NOIR_CART.length);
-  if (typeof showToast === 'function') showToast(bundle.name + ' added to bag');
+  if (typeof showToast === 'function') showToast(cartT('cart.added', { name: cartLoc(bundle, 'name') }));
 
   await persist();
 }
@@ -266,7 +273,15 @@ async function updateLineQty(type, id, delta) {
   const line = NOIR_CART.find(it => it.type === t && it.id === n);
   if (!line) return;
 
-  line.qty += Number(delta) || 0;
+  const d = Number(delta) || 0;
+  if (d > 0 && t === 'product') {
+    const p = cartGetProduct(n);
+    if (p && Number.isFinite(p.stock) && line.qty + d > p.stock) {
+      if (typeof showToast === 'function') showToast(cartT('err.stock', { name: cartLoc(p, 'name') }));
+      return;
+    }
+  }
+  line.qty += d;
   if (line.qty <= 0) {
     NOIR_CART = NOIR_CART.filter(it => !(it.type === t && it.id === n));
   }
@@ -304,6 +319,21 @@ function cartSubtotal() {
     }
     return sum;
   }, 0);
+}
+
+/** Shipping rule (estimate shown in the UI — the database recomputes it on checkout). */
+function cartShipping(subtotal) {
+  const s = (window.NOIR_DB && window.NOIR_DB.settings) || {};
+  const flat = s.shippingFlat != null ? Number(s.shippingFlat) : 8;
+  const free = s.freeShippingOver != null ? Number(s.freeShippingOver) : 99;
+  if (!subtotal) return { fee: 0, freeOver: free, freeLeft: free };
+  const fee = subtotal >= free ? 0 : flat;
+  return { fee, freeOver: free, freeLeft: Math.max(0, free - subtotal) };
+}
+function cartTotals() {
+  const subtotal = cartSubtotal();
+  const sh = cartShipping(subtotal);
+  return { subtotal, shipping: sh.fee, total: subtotal + sh.fee, freeOver: sh.freeOver, freeLeft: sh.freeLeft, count: cartCount() };
 }
 
 function cartCount() {
@@ -359,18 +389,24 @@ function openProductModal(productId) {
 
   const price = cartComputePrice(p);
   const hasOffer = !!p.offer;
+  const out = Number.isFinite(p.stock) && p.stock <= 0;
+  const visual = /^(https?:\/\/|\/)/.test(p.bottle || '')
+    ? '<img class="product-image" src="' + cartEsc(p.bottle) + '" alt="' + cartEsc(cartLoc(p, 'name')) + '">'
+    : '<div class="product-bottle ' + cartEsc(p.bottle || '') + '"></div>';
+  const cat = typeof window.noirCategory === 'function' ? window.noirCategory(p.category) : p.category;
 
   detail.innerHTML = '<div class="product-detail-layout">' +
-    '<div class="detail-visual"><div class="product-bottle ' + (p.bottle || '') + '"></div></div>' +
+    '<div class="detail-visual">' + visual + '</div>' +
     '<div class="detail-copy">' +
-      '<p class="product-category">' + cartEsc(p.category) + '</p>' +
-      '<h2>' + cartEsc(p.name) + '</h2>' +
-      '<p class="product-subtitle">' + cartEsc(p.subtitle) + '</p>' +
-      '<p>' + cartEsc(p.description) + '</p>' +
+      '<p class="product-category">' + cartEsc(cat) + '</p>' +
+      '<h2>' + cartEsc(cartLoc(p, 'name')) + '</h2>' +
+      '<p class="product-subtitle">' + cartEsc(cartLoc(p, 'subtitle')) + '</p>' +
+      '<p>' + cartEsc(cartLoc(p, 'description')) + '</p>' +
       '<div class="detail-price">' + cartMoney(price) +
         (hasOffer ? ' <span style="color:var(--muted);text-decoration:line-through;font-size:13px">' + cartMoney(p.price) + '</span>' : '') +
       '</div>' +
-      '<button class="button button-gold button-full" data-add-to-cart="' + p.id + '">Add to bag</button>' +
+      '<button class="button button-gold button-full" data-add-to-cart="' + p.id + '"' + (out ? ' disabled' : '') + '>' +
+        cartT(out ? 'product.outOfStock' : 'product.addToCart') + '</button>' +
     '</div>' +
   '</div>';
 
@@ -443,6 +479,10 @@ window.cartCount           = cartCount;
 window.openCartDrawer      = openCartDrawer;
 window.closeCartDrawer     = closeCartDrawer;
 window.openProductModal    = openProductModal;
+window.cartTotals          = cartTotals;
+window.cartShipping        = cartShipping;
+window.noirSyncCustomerAfterOrder = syncCustomerAfterOrder;
+window.noirGetCartUserId   = function () { return CURRENT_USER_ID; };
 
 Object.defineProperty(window, 'noirCart', {
   get() { return { items: getCartItems() }; },
@@ -496,89 +536,7 @@ document.addEventListener('click', async function (e) {
   } catch (err) { cartErr('click failed:', err); }
 });
 
-/* ============================================================
-   CHECKOUT → Supabase
-   ============================================================ */
-document.addEventListener('submit', async function (e) {
-  if (e.target.id !== 'checkout-form') return;
-  e.preventDefault();
-
-  const data = new FormData(e.target);
-  const name = data.get('name');
-  const email = data.get('email');
-  const address = data.get('address');
-
-  if (typeof noirHasSupabase !== 'function' || !noirHasSupabase()) {
-    if (typeof showToast === 'function') showToast('❌ Cannot place order — DB not connected.');
-    return;
-  }
-
-  if (!NOIR_CART.length) {
-    if (typeof showToast === 'function') showToast('Your bag is empty');
-    return;
-  }
-
-  const order = {
-    id: 'N-' + Math.floor(1000 + Math.random() * 9000),
-    customer: String(name || 'Guest'),
-    email: String(email || ''),
-    address: String(address || ''),
-    customerId: CURRENT_USER_ID,
-    total: cartSubtotal(),
-    status: 'Processing',
-    items: NOIR_CART.map(line => {
-      if (line.type === 'product') {
-        const p = cartGetProduct(line.id);
-        return {
-          type: 'product',
-          productId: line.id,
-          qty: line.qty,
-          price: p ? cartComputePrice(p) : 0,
-          name: p ? p.name : '',
-        };
-      }
-      const b = cartGetBundle(line.id);
-      return {
-        type: 'bundle',
-        bundleId: line.id,
-        qty: line.qty,
-        price: b ? Number(b.price) || 0 : 0,
-        name: b ? b.name : '',
-        productIds: b ? b.productIds : [],
-      };
-    }),
-  };
-
-  const submitBtn = e.target.querySelector('button[type="submit"]');
-  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Placing order…'; }
-
-  try {
-    await noirSaveOrderToDB(order);
-    cartLog('Order saved ✓', order.id);
-
-    if (typeof window.NOIR_DB !== 'undefined' && window.NOIR_DB) {
-      window.NOIR_DB.orders.unshift(order);
-    }
-
-    await syncCustomerAfterOrder(order);
-    await clearCart();
-
-    const m = e.target.closest('dialog');
-    if (m && typeof m.close === 'function') m.close();
-    e.target.reset();
-
-    if (typeof showToast === 'function') showToast('✅ Order ' + order.id + ' placed!');
-
-    if (typeof window.noirRefreshStoreData === 'function') {
-      await window.noirRefreshStoreData();
-    }
-  } catch (err) {
-    cartErr('order save failed:', err);
-    if (typeof showToast === 'function') showToast('❌ Order failed: ' + (err.message || 'Unknown error'));
-  } finally {
-    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Place order'; }
-  }
-});
+/* Checkout (details → payment → review → confirmation) lives in js/checkout.js */
 
 /* ============================================================
    INIT
@@ -606,3 +564,9 @@ if (document.readyState === 'loading') {
 } else {
   initCart();
 }
+
+window.addEventListener('noir:language', function () {
+  const m = document.getElementById('product-modal');
+  const add = m && m.open && m.querySelector('[data-add-to-cart]');
+  if (add) openProductModal(Number(add.dataset.addToCart));
+});

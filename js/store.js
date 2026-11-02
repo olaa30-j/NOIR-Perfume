@@ -3,7 +3,8 @@
    All reads/writes go directly to Supabase.
    ============================================================ */
 
-const STORE_DEBUG = true;
+// Verbose logging is opt-in: add ?debug to the URL or set localStorage 'noir-debug' = '1'
+const STORE_DEBUG = /[?&]debug\b/.test(location.search) || (function () { try { return localStorage.getItem('noir-debug') === '1'; } catch (e) { return false; } })();
 function storeLog(...args) {
   if (STORE_DEBUG) console.log('%c[STORE]', 'color:#4fae7a;font-weight:bold', ...args);
 }
@@ -32,6 +33,13 @@ let NOIR_DB = {
     bgColor: null,
     textColor: null,
     accentColor: null,
+    shippingFlat: 8,
+    freeShippingOver: 99,
+    codEnabled: true,
+    cardEnabled: false,
+    bankEnabled: false,
+    bankDetails: '',
+    paymentSandbox: false,
   },
 };
 
@@ -82,6 +90,7 @@ const NOIR_DEFAULT_SETTINGS = {
 
 function noirApplySettingsToState(row) {
   if (!row) return;
+  NOIR_DB.settings._paymentColumns = ('cod_enabled' in row);
   NOIR_DB.settings = {
     ...NOIR_DB.settings,
     projectName: row.project_name ?? NOIR_DEFAULT_SETTINGS.projectName,
@@ -94,12 +103,20 @@ function noirApplySettingsToState(row) {
     bgColor: row.bg_color ?? null,
     textColor: row.text_color ?? null,
     accentColor: row.accent_color ?? null,
+    shippingFlat: row.shipping_flat != null ? Number(row.shipping_flat) : 8,
+    freeShippingOver: row.free_shipping_over != null ? Number(row.free_shipping_over) : 99,
+    codEnabled: row.cod_enabled !== false,
+    cardEnabled: row.card_enabled === true,
+    bankEnabled: row.bank_enabled === true,
+    bankDetails: row.bank_details || '',
+    paymentSandbox: row.payment_sandbox === true,
   };
 }
 
 async function noirLoadAppSettings() {
   if (!noirHasSupabase()) {
     storeWarn('noirLoadAppSettings: Supabase not configured');
+    window.__noirSettingsReady = true;
     window.dispatchEvent(new CustomEvent('noir:settings-ready', { detail: NOIR_DB.settings }));
     return false;
   }
@@ -116,10 +133,12 @@ async function noirLoadAppSettings() {
     } else {
       storeWarn('site_settings row id=1 not found — using defaults');
     }
+    window.__noirSettingsReady = true;
     window.dispatchEvent(new CustomEvent('noir:settings-ready', { detail: NOIR_DB.settings }));
     return true;
   } catch (err) {
     storeErr('Load settings failed:', err);
+    window.__noirSettingsReady = true;
     window.dispatchEvent(new CustomEvent('noir:settings-ready', { detail: NOIR_DB.settings }));
     return false;
   }
@@ -142,6 +161,16 @@ async function noirSaveAppSettings(partial) {
     text_color: NOIR_DB.settings.textColor ?? null,
     accent_color: NOIR_DB.settings.accentColor ?? null,
   };
+  // Payment / shipping columns exist only after supabase/schema_upgrade.sql has run
+  if (NOIR_DB.settings._paymentColumns) {
+    row.shipping_flat = Number(NOIR_DB.settings.shippingFlat) || 0;
+    row.free_shipping_over = Number(NOIR_DB.settings.freeShippingOver) || 0;
+    row.cod_enabled = !!NOIR_DB.settings.codEnabled;
+    row.card_enabled = !!NOIR_DB.settings.cardEnabled;
+    row.bank_enabled = !!NOIR_DB.settings.bankEnabled;
+    row.bank_details = NOIR_DB.settings.bankDetails || '';
+    row.payment_sandbox = !!NOIR_DB.settings.paymentSandbox;
+  }
 
   let { data, error } = await window.db
     .from('site_settings')
@@ -169,7 +198,8 @@ async function noirSaveAppSettings(partial) {
   }
 
   noirApplySettingsToState(data);
-  window.dispatchEvent(new CustomEvent('noir:settings-ready', { detail: NOIR_DB.settings }));
+  window.__noirSettingsReady = true;
+    window.dispatchEvent(new CustomEvent('noir:settings-ready', { detail: NOIR_DB.settings }));
   return data;
 }
 
@@ -208,10 +238,14 @@ async function noirLoadFromSupabase() {
       category: row.category,
       price: Number(row.price),
       stock: row.stock,
+      nameAr: row.name_ar || '',
       subtitle: row.subtitle,
+      subtitleAr: row.subtitle_ar || '',
       description: row.description,
+      descriptionAr: row.description_ar || '',
       bottle: row.bottle || '',
       badge: row.badge || '',
+      badgeAr: row.badge_ar || '',
       bestSeller: row.best_seller === true,
       offer: row.offer || null,
     }));
@@ -219,10 +253,13 @@ async function noirLoadFromSupabase() {
     NOIR_DB.bundles = (bundlesRes.data || []).map(row => ({
       id: row.id,
       name: row.name,
+      nameAr: row.name_ar || '',
       description: row.description,
+      descriptionAr: row.description_ar || '',
       productIds: row.product_ids || [],
       price: Number(row.price),
       badge: row.badge || '',
+      badgeAr: row.badge_ar || '',
       bottle: row.bottle || '',
       active: row.active !== false,
     }));
@@ -234,9 +271,19 @@ async function noirLoadFromSupabase() {
       address: row.address || '',
       customerId: row.customer_id || null,
       date: row.created_at ? row.created_at.slice(0, 10) : '',
+      createdAt: row.created_at || '',
       total: Number(row.total),
+      subtotal: row.subtotal != null ? Number(row.subtotal) : Number(row.total),
+      shippingFee: Number(row.shipping_fee) || 0,
       status: row.status,
       items: row.items || [],
+      phone: row.phone || '',
+      city: row.city || '',
+      notes: row.notes || '',
+      paymentMethod: row.payment_method || 'cod',
+      paymentStatus: row.payment_status || 'pending',
+      paymentRef: row.payment_ref || '',
+      paidAt: row.paid_at || '',
     }));
 
     NOIR_DB.customers = (customersRes.data || []).map(row => ({
@@ -304,6 +351,9 @@ async function noirSaveProductToDB(product) {
     stock: product.stock,
     subtitle: product.subtitle,
     description: product.description,
+    name_ar: product.nameAr || null,
+    subtitle_ar: product.subtitleAr || null,
+    description_ar: product.descriptionAr || null,
     bottle: product.bottle || '',
     badge: product.badge || '',
     best_seller: !!product.bestSeller,
@@ -338,6 +388,8 @@ async function noirSaveBundleToDB(bundle) {
   const row = {
     name: bundle.name,
     description: bundle.description,
+    name_ar: bundle.nameAr || null,
+    description_ar: bundle.descriptionAr || null,
     product_ids: bundle.productIds,
     price: bundle.price,
     badge: bundle.badge || '',
@@ -409,44 +461,143 @@ async function noirDeleteHeroSlideFromDB(id) {
 /* ============================================================
    WRITE: ORDER
    ============================================================ */
-async function noirSaveOrderToDB(order) {
-  if (!noirHasSupabase()) throw new Error('Supabase not configured');
-
-  let customerId = order.customerId || null;
-  if (!customerId && window.db?.auth) {
-    try {
-      const { data } = await window.db.auth.getUser();
-      customerId = data?.user?.id || null;
-    } catch (e) { /* ignore */ }
-  }
-
-  const row = {
-    id: order.id,
-    customer_name: order.customer,
-    customer_email: order.email,
-    total: Number(order.total) || 0,
-    status: order.status || 'Processing',
-    items: order.items || [],
-  };
-
-  if (order.address) row.address = String(order.address);
-  if (customerId)    row.customer_id = customerId;
-
-  const { data, error } = await window.db
-    .from('orders')
-    .upsert(row, { onConflict: 'id' })
-    .select()
-    .maybeSingle();
-
-  if (error) throw error;
-  return data || row;
+/**
+ * Place an order. Prices, offers, stock and shipping are computed IN THE DATABASE
+ * (place_order function) — the browser only sends what the customer chose.
+ * Throws an Error whose .code is one of: empty_cart, missing_details,
+ * insufficient_stock, payment_method_disabled, product_not_found, upgrade_required, unknown.
+ */
+async function noirPlaceOrder(input) {
+  if (!noirHasSupabase()) { const e = new Error('Supabase not configured'); e.code = 'unknown'; throw e; }
+  const { data, error } = await window.db.rpc('place_order', {
+    p_name: input.name,
+    p_email: input.email,
+    p_phone: input.phone,
+    p_address: input.address,
+    p_city: input.city || '',
+    p_notes: input.notes || '',
+    p_payment_method: input.paymentMethod || 'cod',
+    p_payment_ref: input.paymentRef || '',
+    p_items: (input.items || []).map(l => ({ type: l.type, id: l.id, qty: l.qty })),
+  });
+  if (error) throw noirRpcError(error);
+  return noirMapOrder(Array.isArray(data) ? data[0] : data);
 }
 
-async function noirUpdateOrderStatusInDB(id, status) {
+function noirRpcError(error) {
+  const msg = String(error && (error.message || error.details) || '');
+  const e = new Error(msg);
+  if (error && (error.code === 'PGRST202' || error.code === '42883')) e.code = 'upgrade_required';
+  else {
+    const m = msg.match(/^(empty_cart|missing_details|insufficient_stock|payment_method_disabled|invalid_payment_method|product_not_found|bundle_not_found|forbidden|cannot_cancel|cannot_pay|cannot_update|sandbox_disabled|order_not_found)(?::(.*))?/);
+    e.code = m ? m[1] : 'unknown';
+    e.detail = m && m[2] ? m[2] : '';
+  }
+  return e;
+}
+
+function noirMapOrder(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    customer: row.customer_name,
+    email: row.customer_email,
+    phone: row.phone || '',
+    address: row.address || '',
+    city: row.city || '',
+    notes: row.notes || '',
+    customerId: row.customer_id || null,
+    date: row.created_at ? row.created_at.slice(0, 10) : '',
+    createdAt: row.created_at || '',
+    total: Number(row.total),
+    subtotal: row.subtotal != null ? Number(row.subtotal) : Number(row.total),
+    shippingFee: Number(row.shipping_fee) || 0,
+    status: row.status,
+    items: row.items || [],
+    paymentMethod: row.payment_method || 'cod',
+    paymentStatus: row.payment_status || 'pending',
+    paymentRef: row.payment_ref || '',
+    paidAt: row.paid_at || '',
+  };
+}
+
+/** Admin: change fulfilment status (logged on the timeline, notifies the customer). */
+async function noirUpdateOrderStatusInDB(id, status, note) {
   if (!noirHasSupabase()) throw new Error('Supabase not configured');
-  const { error } = await window.db.from('orders').update({ status }).eq('id', id);
-  if (error) throw error;
+  const { error } = await window.db.rpc('admin_set_order_status', { p_order: id, p_status: status, p_note: note || null });
+  if (error) throw noirRpcError(error);
   return true;
+}
+
+/** Admin: mark payment pending / paid / failed / refunded. */
+async function noirSetPaymentStatusInDB(id, status, ref) {
+  if (!noirHasSupabase()) throw new Error('Supabase not configured');
+  const { error } = await window.db.rpc('admin_set_payment', { p_order: id, p_status: status, p_ref: ref || null });
+  if (error) throw noirRpcError(error);
+  return true;
+}
+
+async function noirCancelMyOrder(id) {
+  const { error } = await window.db.rpc('cancel_my_order', { p_order: id });
+  if (error) throw noirRpcError(error);
+  return true;
+}
+
+async function noirSubmitPaymentRef(id, ref, email) {
+  const { error } = await window.db.rpc('submit_payment_ref', { p_order: id, p_ref: ref, p_email: email || null });
+  if (error) throw noirRpcError(error);
+  return true;
+}
+
+async function noirSandboxPay(id, success) {
+  const { data, error } = await window.db.rpc('sandbox_pay_order', { p_order: id, p_success: !!success });
+  if (error) throw noirRpcError(error);
+  return noirMapOrder(Array.isArray(data) ? data[0] : data);
+}
+
+/** Customer's own orders (RLS limits the rows to the signed-in user). */
+async function noirLoadMyOrders() {
+  if (!noirHasSupabase()) return [];
+  const { data, error } = await window.db.from('orders').select('*').order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(noirMapOrder);
+}
+
+async function noirLoadOrderEvents(orderId) {
+  if (!noirHasSupabase()) return [];
+  const { data, error } = await window.db.from('order_events')
+    .select('status, note, created_at').eq('order_id', orderId).order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+/** Guest tracking: order number + email. Returns { order, events } or null. */
+async function noirTrackOrder(orderId, email) {
+  const { data, error } = await window.db.rpc('track_order', { p_order: orderId, p_email: email });
+  if (error) throw noirRpcError(error);
+  if (!data) return null;
+  return {
+    order: noirMapOrder({
+      ...data.order, customer_email: email,
+    }),
+    events: data.events || [],
+  };
+}
+
+/* ---------- NOTIFICATIONS ---------- */
+async function noirLoadNotifications(limit) {
+  if (!noirHasSupabase()) return [];
+  const { data, error } = await window.db.from('notifications')
+    .select('*').order('created_at', { ascending: false }).limit(limit || 30);
+  if (error) { storeWarn('notifications load failed:', error.message || error); return []; }
+  return data || [];
+}
+async function noirMarkNotificationsRead(ids) {
+  if (!noirHasSupabase()) return;
+  let q = window.db.from('notifications').update({ read: true }).eq('read', false);
+  if (ids && ids.length) q = q.in('id', ids);
+  const { error } = await q;
+  if (error) storeWarn('mark read failed:', error.message || error);
 }
 
 /* ============================================================
@@ -566,8 +717,18 @@ window.noirSaveBundleToDB = noirSaveBundleToDB;
 window.noirDeleteBundleFromDB = noirDeleteBundleFromDB;
 window.noirSaveHeroSlideToDB = noirSaveHeroSlideToDB;
 window.noirDeleteHeroSlideFromDB = noirDeleteHeroSlideFromDB;
-window.noirSaveOrderToDB = noirSaveOrderToDB;
+window.noirPlaceOrder = noirPlaceOrder;
+window.noirMapOrder = noirMapOrder;
 window.noirUpdateOrderStatusInDB = noirUpdateOrderStatusInDB;
+window.noirSetPaymentStatusInDB = noirSetPaymentStatusInDB;
+window.noirCancelMyOrder = noirCancelMyOrder;
+window.noirSubmitPaymentRef = noirSubmitPaymentRef;
+window.noirSandboxPay = noirSandboxPay;
+window.noirLoadMyOrders = noirLoadMyOrders;
+window.noirLoadOrderEvents = noirLoadOrderEvents;
+window.noirTrackOrder = noirTrackOrder;
+window.noirLoadNotifications = noirLoadNotifications;
+window.noirMarkNotificationsRead = noirMarkNotificationsRead;
 window.noirLoadAppSettings = noirLoadAppSettings;
 window.noirSaveAppSettings = noirSaveAppSettings;
 window.noirSaveCustomerToDB = noirSaveCustomerToDB;

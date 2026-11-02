@@ -11,6 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&family=Inter:wght@400;500;600&family=Libre+Baskerville:wght@400;700&family=Manrope:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
 
+  <link rel="stylesheet" href="css/pages/commerce.css">
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
   <script src="js/supabase-client.js" defer></script>
@@ -18,10 +20,17 @@
   <script src="js/branding.js" defer></script>
   <script src="js/i18n.js" defer></script>
   <script src="js/theme.js" defer></script>
+  <script src="js/i18n-extra.js" defer></script>
+  <script src="js/order-tracker.js" defer></script>
+  <script src="js/notifications.js" defer></script>
+  <script src="js/bag.js" defer></script>
+  <script src="js/ui-enhance.js" defer></script>
   <script src="js/auth.js" defer></script>
   <script  type="module" src="js/app.js"></script>
   <script src="js/products.js" defer></script>
   <script src="js/cart.js" defer></script>
+  <script src="js/checkout.js" defer></script>
+  <script src="js/cart-page.js" defer></script>
   <script type="module" src="js/components/index.js"></script>
 </head>
 <body>
@@ -32,11 +41,17 @@
 
   <noir-layout>
     <main>
-      <section class="story-section section-wrap">
-        <p class="eyebrow centered">Your selection</p>
-        <h2>Your bag is <em>waiting.</em></h2>
-        <p>Review your fragrances and continue when you are ready.</p>
-        <a href="shop.html" class="button button-gold">Continue shopping →</a>
+      <section class="bag-page section-wrap" id="bag-page">
+        <div class="bag-page-head">
+          <p class="eyebrow" data-i18n="cart.eyebrow">Your selection</p>
+          <h1 data-i18n="cart.pageTitle">Your bag</h1>
+          <p class="section-subtitle" data-i18n="cart.pageIntro">Review your fragrances, then continue to a secure checkout.</p>
+          <p class="bag-page-count" id="bag-page-count"></p>
+        </div>
+        <div class="bag-page-grid">
+          <div class="bag-page-items" id="bag-page-items"></div>
+          <aside class="bag-page-summary" id="bag-page-summary" aria-label="Order summary"></aside>
+        </div>
       </section>
     </main>
   </noir-layout>

@@ -9,7 +9,7 @@ class SiteHeader extends HTMLElement {
   connectedCallback() {
     this.innerHTML = `
       <div class="announcement">
-        <span>Complimentary delivery on orders over $99</span>
+        <span data-announce>Complimentary delivery on orders over $99</span>
         <span class="announcement-ar" lang="ar">توصيل مجاني للطلبات فوق ٩٩ دولار</span>
       </div>
       <header class="site-header">
@@ -26,6 +26,11 @@ class SiteHeader extends HTMLElement {
         </nav>
         <div class="header-actions">
           <button class="icon-button" id="search-toggle" aria-label="Search products">⌕</button>
+
+          <button class="icon-button lang-toggle" id="lang-toggle" type="button"
+                  data-i18n="lang.toggle" aria-label="Switch language">العربية</button>
+
+          <div data-notifs></div>
 
           <button class="icon-button" id="account-button" aria-label="Open account">
             <span id="account-icon">♙</span>
@@ -84,6 +89,28 @@ class SiteHeader extends HTMLElement {
       }
     });
 
+    /* ---- language toggle (visitor choice, remembered in this browser) ---- */
+    this.querySelector('#lang-toggle').addEventListener('click', () => {
+      const next = (typeof window.noirLang === 'function' ? window.noirLang() : 'en') === 'ar' ? 'en' : 'ar';
+      if (typeof window.noirSetLang === 'function') window.noirSetLang(next);
+    });
+    if (typeof window.noirTranslate === 'function') window.noirTranslate();
+
+    /* ---- announcement follows the free-shipping threshold from settings ---- */
+    this._syncAnnounce = () => {
+      const el = this.querySelector('[data-announce]');
+      if (!el || typeof window.noirT !== 'function') return;
+      const st = (window.NOIR_DB && window.NOIR_DB.settings) || {};
+      const amt = '$' + (st.freeShippingOver != null ? Number(st.freeShippingOver) : 99);
+      el.textContent = window.noirT('announce.free', { amount: amt });
+    };
+    this._syncAnnounce();
+    window.addEventListener('noir:settings-ready', this._syncAnnounce);
+    window.addEventListener('noir:language', this._syncAnnounce);
+
+    /* ---- notifications bell ---- */
+    if (window.noirNotifs) window.noirNotifs.mount(this.querySelector('[data-notifs]'));
+
     /* ---- active link ---- */
     const path = location.pathname.split('/').pop() || 'index.html';
     this.querySelectorAll('#main-nav a').forEach(a => {
@@ -117,6 +144,8 @@ class SiteHeader extends HTMLElement {
   }
 
   disconnectedCallback() {
+    window.removeEventListener('noir:settings-ready', this._syncAnnounce);
+    window.removeEventListener('noir:language', this._syncAnnounce);
     window.removeEventListener('noir:cart-updated', this._onCartUpdate);
     window.removeEventListener('noir:data-ready', this._onCartUpdate);
     window.removeEventListener('noir:auth-changed', this._onAuthChanged);
@@ -130,19 +159,16 @@ class SiteHeader extends HTMLElement {
      CART COUNT — from backend (authoritative)
      ============================================================ */
   async _fetchCount() {
-    // 1) try backend
+    // The in-memory cart (js/cart.js) is the source of truth for the current visitor:
+    // it is loaded from / saved to the database for signed-in users, and is the
+    // only copy for guests (the database has no cart for a guest).
+    if (typeof window.getCartCount === 'function') {
+      try { return { count: Number(window.getCartCount()) || 0, source: 'memory' }; } catch (e) { /* fall through */ }
+    }
     if (typeof window.getCartCountFromDB === 'function') {
       try {
         const n = await window.getCartCountFromDB();
-        if (typeof n === 'number' && !Number.isNaN(n)) {
-          return { count: n, source: 'backend' };
-        }
-      } catch (e) { /* ignore */ }
-    }
-    // 2) fallback to in-memory
-    if (typeof window.getCartCount === 'function') {
-      try {
-        return { count: Number(window.getCartCount()) || 0, source: 'memory' };
+        if (typeof n === 'number' && !Number.isNaN(n)) return { count: n, source: 'backend' };
       } catch (e) { /* ignore */ }
     }
     return { count: 0, source: 'none' };

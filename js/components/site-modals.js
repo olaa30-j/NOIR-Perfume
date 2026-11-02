@@ -1,9 +1,7 @@
 /* ============================================================
    NOIR — <site-modals> custom element
    - Provides product-modal + checkout-modal
-   - Delegates checkout submission to cart.js (#checkout-form)
-   - Updates the total on open / on 'noir:cart-updated'
-   - No localStorage anywhere
+   - checkout-modal hosts the multi-step flow from js/checkout.js
    ============================================================ */
 
 class SiteModals extends HTMLElement {
@@ -14,32 +12,11 @@ class SiteModals extends HTMLElement {
         <div id="product-detail"></div>
       </dialog>
 
-      <dialog class="modal checkout-modal" id="checkout-modal">
-        <button class="modal-close" data-close="checkout-modal" aria-label="Close">×</button>
-        <p class="eyebrow">Almost yours</p>
-        <h2>Checkout</h2>
-        <p class="modal-description">Enter your details to place your order.</p>
-
-        <form id="checkout-form" class="checkout-form" autocomplete="on">
-          <label>Full name
-            <input name="name" required placeholder="Your name" autocomplete="name">
-          </label>
-          <label>Email address
-            <input name="email" type="email" required placeholder="you@example.com" autocomplete="email">
-          </label>
-          <label>Delivery address
-            <textarea name="address" required rows="3"
-                      placeholder="Street, city, country"
-                      autocomplete="street-address"></textarea>
-          </label>
-
-          <div class="subtotal">
-            <span>Total</span>
-            <strong data-checkout-total>$0.00</strong>
-          </div>
-
-          <button class="button button-gold button-full" type="submit">Place order</button>
-        </form>
+      <dialog class="modal checkout-modal" id="checkout-modal" aria-labelledby="checkout-title">
+        <button class="modal-close" data-close="checkout-modal" data-i18n-aria="checkout.close" aria-label="Close">×</button>
+        <p class="eyebrow" data-i18n="checkout.eyebrow">Almost yours</p>
+        <h2 id="checkout-title" data-co-title>Checkout</h2>
+        <div id="checkout-flow"></div>
       </dialog>
     `;
 
@@ -55,45 +32,12 @@ class SiteModals extends HTMLElement {
       });
     });
 
-    /* ---- keep total in sync ---- */
-    this._onCartUpdate = () => this._refreshTotal();
-    window.addEventListener('noir:cart-updated', this._onCartUpdate);
-    window.addEventListener('noir:data-ready', this._onCartUpdate);
-    window.addEventListener('noir:auth-changed', this._onCartUpdate);
+    /* NOTE: the checkout flow itself lives in js/checkout.js (renders into #checkout-flow). */
 
-    /* ---- initial total ---- */
-    this._refreshTotal();
-
-    /* NOTE:
-       The submit handler for #checkout-form lives in cart.js.
-       We intentionally do NOT attach another submit listener here
-       to avoid double-processing the order.
-    */
-  }
-
-  disconnectedCallback() {
-    window.removeEventListener('noir:cart-updated', this._onCartUpdate);
-    window.removeEventListener('noir:data-ready', this._onCartUpdate);
-    window.removeEventListener('noir:auth-changed', this._onCartUpdate);
-  }
-
-  /* ============================================================
-     Total
-     ============================================================ */
-  _refreshTotal() {
-    const el = this.querySelector('[data-checkout-total]');
-    if (!el) return;
-
-    let total = 0;
-    try {
-      if (typeof window.getCartSubtotal === 'function') {
-        total = Number(window.getCartSubtotal()) || 0;
-      } else if (typeof window.cartSubtotal === 'function') {
-        total = Number(window.cartSubtotal()) || 0;
-      }
-    } catch (e) { /* ignore */ }
-
-    el.textContent = '$' + total.toFixed(2);
+    /* ---- restore page scroll whenever any dialog closes (Esc, backdrop, button) ---- */
+    this.querySelectorAll('dialog').forEach(dlg => {
+      dlg.addEventListener('close', () => { document.body.style.overflow = ''; });
+    });
   }
 
   /* ============================================================
@@ -103,8 +47,8 @@ class SiteModals extends HTMLElement {
     const dlg = this.querySelector('#' + id);
     if (!dlg) return;
 
-    // refresh total right before opening checkout
-    if (id === 'checkout-modal') this._refreshTotal();
+    // (re)start the checkout flow right before opening it
+    if (id === 'checkout-modal' && window.noirCheckout) window.noirCheckout.start();
 
     if (typeof dlg.showModal === 'function') dlg.showModal();
     else dlg.setAttribute('open', '');

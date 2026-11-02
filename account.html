@@ -11,6 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&family=Inter:wght@400;500;600&family=Libre+Baskerville:wght@400;700&family=Manrope:wght@400;500;600;700&family=Cairo:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
 
+  <link rel="stylesheet" href="css/pages/commerce.css">
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
   <script src="js/supabase-client.js" defer></script>
@@ -18,9 +20,16 @@
   <script src="js/branding.js" defer></script>
   <script src="js/i18n.js" defer></script>
   <script src="js/theme.js" defer></script>
+  <script src="js/i18n-extra.js" defer></script>
+  <script src="js/order-tracker.js" defer></script>
+  <script src="js/notifications.js" defer></script>
+  <script src="js/bag.js" defer></script>
+  <script src="js/ui-enhance.js" defer></script>
   <script src="js/auth.js" defer></script>
   <script  type="module" src="js/app.js"></script>
   <script src="js/cart.js" defer></script>
+  <script src="js/checkout.js" defer></script>
+  <script src="js/account-page.js" defer></script>
   <script type="module" src="js/components/index.js"></script>
 </head>
 <body>
@@ -31,100 +40,44 @@
 
   <noir-layout>
     <main>
-      <section class="story-section section-wrap" id="account-view">
-        <p class="eyebrow centered">Your account</p>
-        <h2>Welcome <em id="account-name">guest.</em></h2>
-        <p id="account-copy">Sign in to continue as a customer, or open the admin studio.</p>
-
-        <!-- Guest state -->
-        <div id="account-actions" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:18px">
-          <a href="login.html" class="button button-gold">Sign in →</a>
+      <section class="account-page section-wrap" id="account-view">
+        <div class="account-head">
+          <p class="eyebrow centered" data-i18n="acct.eyebrow">Your account</p>
+          <h1><span data-i18n="acct.welcome">Welcome</span> <em id="account-name"></em></h1>
+          <p id="account-copy" class="section-subtitle"></p>
+          <div id="account-actions" class="account-actions"></div>
         </div>
 
-        <!-- Signed-in state -->
-        <div id="account-signed" style="display:none;max-width:520px;margin:24px auto 0;text-align:left;border:1px solid var(--line);background:var(--panel);padding:22px;border-radius:var(--radius)">
-          <p class="small-note" style="margin-top:0">Signed in as</p>
-          <h3 id="signed-email" style="font-family:var(--serif);font-weight:500;font-size:26px;margin:4px 0 2px"></h3>
-          <p id="signed-role" style="color:var(--gold);letter-spacing:.12em;text-transform:uppercase;font-size:10px;margin:0 0 18px"></p>
-          <a id="signed-admin-link" href="admin.html" class="button button-gold button-full" style="display:none;margin-bottom:10px">Open admin studio →</a>
-          <a href="shop.html" class="button button-outline button-full" style="margin-bottom:10px">Continue shopping →</a>
-          <button class="button button-outline button-full" id="signout-btn">Sign out</button>
+        <div class="account-grid">
+          <div class="account-main">
+            <div id="account-orders-wrap" hidden>
+              <h2 class="account-h" data-i18n="acct.myOrders">My orders</h2>
+              <div id="account-orders" class="order-list" aria-live="polite"></div>
+            </div>
+
+            <div class="track-card" id="track-card">
+              <h2 class="account-h" data-i18n="acct.trackTitle">Track an order</h2>
+              <p class="section-subtitle" data-i18n="acct.trackCopy">Enter your order number and the email used at checkout.</p>
+              <form id="track-form" class="track-form">
+                <input name="order" required autocomplete="off" data-i18n-placeholder="acct.orderNumber" placeholder="N-10001">
+                <input name="email" type="email" required autocomplete="email" data-i18n-placeholder="checkout.email" placeholder="you@example.com">
+                <button class="button button-gold" type="submit" data-i18n="acct.trackBtn">Track</button>
+              </form>
+              <div id="track-result"></div>
+            </div>
+          </div>
+
+          <aside id="account-signed" class="account-card" hidden>
+            <p class="small-note" data-i18n="acct.signedAs">Signed in as</p>
+            <h3 id="signed-email"></h3>
+            <p id="signed-role" class="account-role"></p>
+            <a id="signed-admin-link" href="admin.html" class="button button-gold button-full" hidden data-i18n="acct.openAdmin">Open admin studio</a>
+            <a href="shop.html" class="button button-outline button-full" data-i18n="cart.continue">Continue shopping</a>
+            <button class="button button-outline button-full" id="signout-btn" data-i18n="acct.signOut">Sign out</button>
+          </aside>
         </div>
       </section>
     </main>
   </noir-layout>
-
-  <script>
-    /* Populate account view — runs after auth.js loaded */
-    (function () {
-      function render() {
-        const s = (typeof noirGetSession === 'function') ? noirGetSession() : null;
-        const nameEl = document.getElementById('account-name');
-        const copyEl = document.getElementById('account-copy');
-        const actions = document.getElementById('account-actions');
-        const signed = document.getElementById('account-signed');
-        const emailEl = document.getElementById('signed-email');
-        const roleEl = document.getElementById('signed-role');
-        const adminLink = document.getElementById('signed-admin-link');
-
-        if (!s) {
-          if (nameEl) nameEl.textContent = 'guest.';
-          if (copyEl) copyEl.textContent = 'Sign in to continue as a customer, or open the admin studio.';
-          if (actions) actions.style.display = 'flex';
-          if (signed) signed.style.display = 'none';
-          return;
-        }
-
-        if (nameEl) nameEl.textContent = (s.name || 'friend') + '.';
-        if (copyEl) copyEl.textContent = 'You are signed in. Manage your session below.';
-        if (actions) actions.style.display = 'none';
-        if (signed) signed.style.display = 'block';
-        if (emailEl) emailEl.textContent = s.email;
-        if (roleEl) roleEl.textContent = s.role === 'admin' ? 'Administrator' : 'Customer';
-        if (adminLink) adminLink.style.display = s.role === 'admin' ? 'inline-flex' : 'none';
-
-        const btn = document.getElementById('signout-btn');
-        if (btn && !btn._bound) {
-          btn._bound = true;
-          btn.addEventListener('click', () => {
-            if (typeof noirLogout === 'function') noirLogout('login.html');
-            else { localStorage.removeItem('NOIR_SESSION'); location.href = 'login.html'; }
-          });
-        }
-      }
-
-      // Sync with Supabase session if available
-      if (window.db && window.db.auth && typeof noirHasAuth === 'function' && noirHasAuth()) {
-        window.db.auth.getSession().then(({ data }) => {
-          if (data && data.session) {
-            const s = (typeof noirGetSession === 'function') ? noirGetSession() : null;
-            if (!s) {
-              const email = data.session.user.email;
-              const role = email === 'admin@gmail.com' ? 'admin' : 'customer';
-              if (typeof noirSetSession === 'function') {
-                noirSetSession({
-                  email,
-                  role,
-                  name: data.session.user.user_metadata?.name || email.split('@')[0],
-                  at: Date.now(),
-                  source: 'supabase',
-                  userId: data.session.user.id,
-                });
-              }
-            }
-            render();
-          } else {
-            render();
-          }
-        }).catch(render);
-      } else {
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', render);
-        } else {
-          render();
-        }
-      }
-    })();
-  </script>
 </body>
 </html>

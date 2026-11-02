@@ -6,7 +6,10 @@ html {
 }
 
 noir-layout { display: block; }
-site-header, site-footer, site-cart, site-modals { display: block; }
+site-footer, site-cart, site-modals { display: block; }
+/* display:contents lets the sticky .site-header stick against the whole page
+   (as a block it could only stick inside its own, header-sized parent) */
+site-header { display: contents; }
 
 :root,
 [data-theme="midnight"] {
@@ -27,6 +30,12 @@ site-header, site-footer, site-cart, site-modals { display: block; }
   --shadow: 0 22px 70px color-mix(in srgb, var(--bg) 60%, black);
 
   --radius: 6px;
+  --radius-lg: calc(var(--radius) * 2);
+  --on-accent: var(--bg);
+  --scrim: rgba(0, 0, 0, .6);
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --dur-fast: .2s;
+  --dur: .35s;
 
   --tracking-tight: -0.02em;
   --tracking-wide: 0.12em;
@@ -61,6 +70,7 @@ site-header, site-footer, site-cart, site-modals { display: block; }
   --admin-nav-hover: color-mix(in srgb, var(--accent) 18%, var(--bg));
 }
 
+/* ---------- Dark themes ---------- */
 [data-theme="aurora"] {
   --bg: #0b0a1a;
   --text: #eae7f7;
@@ -83,19 +93,72 @@ site-header, site-footer, site-cart, site-modals { display: block; }
   --font-sans: "Inter";
 }
 
+[data-theme="sapphire"] {
+  --bg: #060d1f;
+  --text: #e6edfb;
+  --accent: #5b9bd5;
+  --font-serif: "Playfair Display";
+  --font-sans: "Inter";
+}
+
+[data-theme="oud"] {
+  --bg: #130c07;
+  --text: #f3e6d6;
+  --accent: #d08a3e;
+  --font-serif: "Libre Baskerville";
+  --font-sans: "Manrope";
+}
+
+[data-theme="onyx"] {
+  --bg: #0a0a0b;
+  --text: #ededee;
+  --accent: #c7c9cf;
+  --font-serif: "Playfair Display";
+  --font-sans: "Inter";
+}
+
+/* ---------- Light themes ---------- */
 [data-theme="ivory"] {
-  color-scheme: light only;
   --bg: #f6f2ea;
   --text: #2a2418;
   --accent: #a67c3a;
-  --surface-admin-sidebar: color-mix(in srgb, var(--bg) 88%, black);
 }
 
-@media (prefers-color-scheme: dark) {
-  [data-theme="ivory"] { color-scheme: light only; }
+[data-theme="rose"] {
+  --bg: #faf1ee;
+  --text: #3a2226;
+  --accent: #b5586b;
+  --font-serif: "Playfair Display";
+  --font-sans: "Inter";
 }
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="ivory"]) { color-scheme: dark only; }
+
+[data-theme="sand"] {
+  --bg: #efe3cc;
+  --text: #2b2417;
+  --accent: #9a5b2c;
+  --font-serif: "Libre Baskerville";
+  --font-sans: "Manrope";
+}
+
+/* Shared overrides: light surfaces need darker accents, softer shadows
+   and darker (not lighter) chrome so muted text keeps its contrast. */
+[data-theme="ivory"],
+[data-theme="rose"],
+[data-theme="sand"] {
+  color-scheme: light only;
+  --panel: color-mix(in srgb, var(--bg) 55%, white);
+  --panel-2: color-mix(in srgb, var(--bg) 88%, black);
+  --gold-light: color-mix(in srgb, var(--accent) 82%, black);
+  --muted: color-mix(in srgb, var(--text) 68%, var(--bg));
+  --line: color-mix(in srgb, var(--accent) 32%, transparent);
+  --shadow: 0 18px 50px color-mix(in srgb, var(--text) 16%, transparent);
+  --surface-announcement: color-mix(in srgb, var(--bg) 90%, black);
+  --surface-benefits: color-mix(in srgb, var(--bg) 94%, black);
+  --surface-footer: color-mix(in srgb, var(--bg) 90%, black);
+  --surface-admin-sidebar: color-mix(in srgb, var(--bg) 88%, black);
+  --surface-product-glow: color-mix(in srgb, var(--accent) 16%, transparent);
+  --scrim: rgba(40, 28, 18, .45);
+  --hero-end: var(--accent);
 }
 
 /* ============================================================
@@ -173,6 +236,8 @@ h1, h2, h3, .brand span, .banner-ornament span {
 /* ============================================================
    UTILITIES
    ============================================================ */
+/* the [hidden] attribute must win over component display rules (.button { display:inline-flex } etc.) */
+[hidden] { display: none !important; }
 .hidden { display: none !important; }
 .sr-only {
   position: absolute;
@@ -263,7 +328,7 @@ h1, h2, h3, .brand span, .banner-ornament span {
   height: 17px;
   border-radius: 50%;
   background: var(--gold);
-  color: var(--bg);
+  color: var(--on-accent);
   font-size: 9px;
   font-weight: 700;
 }
@@ -303,7 +368,7 @@ h1, h2, h3, .brand span, .banner-ornament span {
     radial-gradient(ellipse 40% 60% at 20% 80%,
       color-mix(in srgb, var(--gold) 8%, transparent), transparent 55%),
     linear-gradient(110deg, var(--bg) 0%, var(--panel) 56%,
-      color-mix(in srgb, var(--bg) 80%, black) 100%);
+      color-mix(in srgb, var(--bg) 80%, var(--hero-end, black)) 100%);
 }
 .hero:after {
   content: "";
@@ -437,11 +502,11 @@ h1, h2, h3, .brand span, .banner-ornament span {
   position: relative;
   overflow: hidden;
 }
-.button:hover { background: var(--gold); color: var(--bg); transform: translateY(-2px); }
+.button:hover { background: var(--gold); color: var(--on-accent); transform: translateY(-2px); }
 .button-outline { border-radius: var(--radius); }
 .button-gold {
   background: linear-gradient(115deg, var(--gold), var(--gold-light));
-  color: var(--bg);
+  color: var(--on-accent);
   border-color: transparent;
   position: relative;
   overflow: hidden;
@@ -790,7 +855,7 @@ h1, h2, h3, .brand span, .banner-ornament span {
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, .6);
+  background: var(--scrim);
   z-index: 50;
   backdrop-filter: blur(3px);
 }
@@ -1001,7 +1066,7 @@ h1, h2, h3, .brand span, .banner-ornament span {
   transition: transform .2s, background .2s, color .2s;
 }
 [dir="rtl"] .theme-fab { right: auto; left: 24px; }
-.theme-fab:hover { transform: scale(1.08) rotate(15deg); background: var(--gold); color: var(--bg); }
+.theme-fab:hover { transform: scale(1.08) rotate(15deg); background: var(--gold); color: var(--on-accent); }
 .tc-backdrop {
   position: fixed;
   inset: 0;
@@ -1176,8 +1241,8 @@ h1, h2, h3, .brand span, .banner-ornament span {
   align-items: center;
   justify-content: center;
   gap: 16px;
-  background: #07111c;
-  color: #f5ead7;
+  background: var(--bg, #07111c);
+  color: var(--text, #f5ead7);
   transition: opacity 0.35s ease, visibility 0.35s ease;
 }
 .noir-loader.hidden {
@@ -1188,11 +1253,11 @@ h1, h2, h3, .brand span, .banner-ornament span {
 .noir-loader-spinner {
   width: 40px;
   height: 40px;
-  border: 2px solid rgba(200, 155, 85, 0.25);
-  border-top-color: #c89b55;
+  border: 2px solid color-mix(in srgb, var(--accent, #c89b55) 25%, transparent);
+  border-top-color: var(--accent, #c89b55);
   border-radius: 50%;
   animation: noir-spin 0.9s linear infinite;
-  box-shadow: 0 0 24px color-mix(in srgb, #c89b55 40%, transparent);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--accent, #c89b55) 40%, transparent);
 }
 .noir-loader-text {
   font-family: 'DM Sans', sans-serif;
@@ -1301,3 +1366,218 @@ h1, h2, h3, .brand span, .banner-ornament span {
     animation: none !important;
   }
 }
+
+/* ============================================================
+   ENHANCEMENTS — polish layer (header state, reveal, a11y, pickers)
+   Driven by js/ui-enhance.js and the header theme picker.
+   ============================================================ */
+
+/* ---- Skip link (keyboard / screen-reader users) ---- */
+.skip-link {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 10000;
+  padding: 10px 16px;
+  background: var(--gold);
+  color: var(--on-accent);
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  border-radius: var(--radius);
+  transform: translateY(-160%);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.skip-link:focus { transform: translateY(0); }
+
+/* ---- Header: condenses and gains depth after scrolling ---- */
+.site-header {
+  transition: height var(--dur) var(--ease-out), background-color var(--dur), box-shadow var(--dur), border-color var(--dur);
+}
+.site-header.is-scrolled {
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border-bottom-color: var(--line);
+  box-shadow: 0 10px 34px -14px color-mix(in srgb, var(--bg) 55%, black);
+  backdrop-filter: blur(18px) saturate(1.3);
+}
+@media (min-width: 681px) {
+  .site-header.is-scrolled { height: 68px; }
+  .site-header.is-scrolled .brand span { font-size: 32px; }
+}
+.brand span { transition: font-size var(--dur) var(--ease-out); }
+.main-nav a[aria-current="page"] { color: var(--gold-light); }
+.main-nav a[aria-current="page"]::after { width: 100%; }
+
+/* ---- Scroll progress ---- */
+.scroll-progress {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  z-index: 60;
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--gold), var(--gold-light));
+  transform-origin: left center;
+  transform: scaleX(var(--progress, 0));
+}
+[dir="rtl"] .scroll-progress { transform-origin: right center; }
+
+/* ---- Scroll reveal (only when JS has marked the page ready) ---- */
+.reveal-ready .js-reveal {
+  opacity: 0;
+  transform: translateY(26px);
+  transition: opacity .8s var(--ease-out), transform .8s var(--ease-out);
+  transition-delay: var(--reveal-delay, 0s);
+}
+.reveal-ready .js-reveal.is-visible { opacity: 1; transform: none; }
+
+/* ---- Back to top ---- */
+.to-top {
+  position: fixed;
+  right: 24px;
+  bottom: 88px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  color: var(--gold);
+  font-size: 18px;
+  z-index: 40;
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+  transition: opacity var(--dur), transform var(--dur) var(--ease-out), background var(--dur-fast), color var(--dur-fast);
+}
+.to-top.show { opacity: 1; transform: none; pointer-events: auto; }
+.to-top:hover { background: var(--gold); color: var(--on-accent); }
+[dir="rtl"] .to-top { right: auto; left: 24px; }
+
+/* ---- Visitor theme picker (header popover) ---- */
+.theme-picker { position: relative; display: inline-flex; }
+.theme-popover {
+  position: absolute;
+  top: calc(100% + 14px);
+  right: -8px;
+  width: 236px;
+  padding: 16px;
+  background: var(--surface-modal);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  z-index: 70;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px) scale(.98);
+  transform-origin: top right;
+  transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease-out), visibility var(--dur-fast);
+}
+[dir="rtl"] .theme-popover { right: auto; left: -8px; transform-origin: top left; }
+.theme-popover.open { opacity: 1; visibility: visible; transform: none; }
+.theme-popover h3 {
+  margin: 0 0 12px;
+  font-size: 9px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+.theme-swatches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.theme-swatch {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--cream);
+  font-size: 9px;
+  letter-spacing: .06em;
+  transition: border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast);
+}
+.theme-swatch i {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--text) 25%, transparent);
+  background: linear-gradient(135deg, var(--sw-bg) 52%, var(--sw-accent) 52%);
+}
+.theme-swatch:hover { transform: translateY(-2px); background: color-mix(in srgb, var(--gold) 10%, transparent); }
+.theme-swatch[aria-pressed="true"] { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 12%, transparent); }
+.theme-popover .theme-reset {
+  width: 100%;
+  margin-top: 12px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  transition: color var(--dur-fast), border-color var(--dur-fast);
+}
+.theme-popover .theme-reset:hover { color: var(--cream); border-color: var(--gold); }
+
+@media (max-width: 680px) {
+  .theme-popover { position: fixed; top: 76px; right: 12px; left: 12px; width: auto; }
+  .to-top { right: 16px; bottom: 72px; }
+  [dir="rtl"] .to-top { left: 16px; }
+}
+
+/* ---- Form focus: soft accent glow instead of bare outline ---- */
+.checkout-form input:focus,
+.checkout-form textarea:focus,
+.lang-switcher select:focus {
+  outline: 0;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 20%, transparent);
+}
+.search-field:focus-within,
+.select-field:focus-within {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 16%, transparent);
+}
+
+/* ---- Buttons: press + disabled states ---- */
+.button:active { transform: translateY(0) scale(.98); }
+.button[disabled],
+.button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; pointer-events: none; }
+.button-outline:hover { box-shadow: 0 10px 28px -12px color-mix(in srgb, var(--gold) 60%, transparent); }
+
+/* ---- Cart / modal polish ---- */
+.cart-count { transition: transform var(--dur-fast) var(--ease-out); }
+.cart-count.bump { animation: count-bump .45s var(--ease-out); }
+@keyframes count-bump { 40% { transform: scale(1.45); } }
+.modal[open] { animation: modal-in var(--dur) var(--ease-out); }
+@keyframes modal-in { from { opacity: 0; transform: translateY(14px) scale(.98); } }
+.modal::backdrop { background: var(--scrim); }
+.quantity-controls button { transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast); }
+.quantity-controls button:hover { background: var(--gold); color: var(--on-accent); border-color: var(--gold); }
+
+/* ---- Toast gets an accent edge ---- */
+.toast { border-inline-start: 3px solid var(--gold); }
+
+/* ---- Smooth theme switching (class is toggled briefly by theme.js) ---- */
+.theme-transition,
+.theme-transition *,
+.theme-transition *::before,
+.theme-transition *::after {
+  transition: background-color .45s ease, color .45s ease, border-color .45s ease, fill .45s ease !important;
+}
+
+/* ---- Hero pagination: larger hit area without changing the dot size ---- */
+.hero-pagination button { position: relative; }
+.hero-pagination button::after { content: ""; position: absolute; inset: -9px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-ready .js-reveal { opacity: 1; transform: none; transition: none; }
+  .scroll-progress { display: none; }
+}
+
+/* announcement bar: in Arabic the translated first line is the Arabic one — don't repeat it */
+html[lang="ar"] .announcement-ar { display: none; }

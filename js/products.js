@@ -4,7 +4,7 @@
    Ensures cart badge + order sync work.
    ============================================================ */
 
-const PRODUCTS_DEBUG = true;
+const PRODUCTS_DEBUG = /[?&]debug\b/.test(location.search);
 function pLog(...args) {
   if (PRODUCTS_DEBUG) console.log('%c[PRODUCTS]', 'color:#c89b55;font-weight:bold', ...args);
 }
@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', function () {
       const s = (sort && sort.value) || 'featured';
 
       let list = NOIR_DB.products.slice();
-      if (q) list = list.filter(p => `${p.name} ${p.category} ${p.subtitle}`.toLowerCase().includes(q));
+      if (q) list = list.filter(p => `${p.name} ${p.nameAr || ''} ${p.category} ${p.subtitle} ${p.subtitleAr || ''}`.toLowerCase().includes(q));
       if (cat !== 'all') list = list.filter(p => p.category === cat);
       if (s === 'low') list.sort((a, b) => noirComputePrice(a) - noirComputePrice(b));
       else if (s === 'high') list.sort((a, b) => noirComputePrice(b) - noirComputePrice(a));
