@@ -434,13 +434,25 @@ onLayoutReady(function () {
     const adminOpen = $('#admin-open');
     if (adminOpen) adminOpen.addEventListener('click', function (e) {
       e.preventDefault();
-      window.location.href = 'login.html?role=admin&next=admin.html';
+      window.location.href = 'login.html?next=' + encodeURIComponent('admin.html');
     });
   } catch (e) { console.error('[app.js] navbar buttons init failed:', e); }
 });
 
 /* ============================================================
    7b. ADD-TO-CART GATE (signed-in only) — products + bundles
+
+   This handler ONLY gates. It does NOT add to cart itself.
+   cart.js's delegated handler performs the actual add.
+
+   Previously this handler called addProductToCart /
+   addBundleToCart directly, and cart.js's handler also called
+   them — every click added the item twice.
+
+   Registered with `capture: true` so it runs before cart.js's
+   bubble-phase listener on document. On the guest branch,
+   stopImmediatePropagation() prevents cart.js from also running
+   (nothing should be added for a guest).
    ============================================================ */
 onLayoutReady(function () {
   try {
@@ -450,27 +462,23 @@ onLayoutReady(function () {
       if (!addBtn && !bundleBtn) return;
 
       const btn = addBtn || bundleBtn;
-      e.preventDefault();
+      if (btn && btn.disabled) return;
 
-      // 1) Auth check
       let session = __noirSession;
-      if (session === null) session = await resolveSession();
+      if (session === null) {
+        try { session = await resolveSession(); } catch (err) { session = null; }
+        __noirSession = session;
+      }
+
       if (!session) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
         const next = encodeURIComponent(location.pathname + location.search + location.hash);
         window.location.href = 'login.html?next=' + next;
         return;
       }
-
-      // 2) Signed in — let the cart module handle the actual add.
-      if (addBtn) {
-        const id = Number(addBtn.getAttribute('data-add-to-cart'));
-        if (typeof window.addProductToCart === 'function') await window.addProductToCart(id, 1);
-        else if (typeof window.addToCart === 'function') await window.addToCart(id, 1);
-      } else if (bundleBtn) {
-        const id = Number(bundleBtn.getAttribute('data-add-bundle'));
-        if (typeof window.addBundleToCart === 'function') await window.addBundleToCart(id, 1);
-      }
-    });
+      // Signed in — do nothing. cart.js's delegated handler adds the item.
+    }, true);
   } catch (e) { console.error('[app.js] add-to-cart gate init failed:', e); }
 });
 
