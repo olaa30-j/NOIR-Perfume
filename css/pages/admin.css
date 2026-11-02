@@ -255,7 +255,10 @@
 #product-form-panel,
 #bundle-form-panel,
 #admin-store-form,
-#admin-store-setting{
+#admin-store-setting,
+#admin-pay-settings,
+#admin-data-settings,
+#admin-appearance-settings{
   margin-bottom: 20px;
 }
 

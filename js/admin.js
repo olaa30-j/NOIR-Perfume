@@ -525,7 +525,7 @@ function renderSettingsAdmin() {
     </div>
   </section>
 
-  <section class="admin-panel">
+  <section class="admin-panel" id="admin-appearance-settings">
     <h3>Appearance</h3>
     <div class="admin-setting-row"><label>Language</label><select id="admin-lang-select" class="admin-search"><option value="en" ${lang === 'en' ? 'selected' : ''}>English</option><option value="ar" ${lang === 'ar' ? 'selected' : ''}>العربية</option></select></div>
     <div class="admin-setting-row"><label>Default theme</label><select id="admin-theme-select" class="admin-search">${themes.map(t => `<option value="${t}" ${theme === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
@@ -546,7 +546,7 @@ function renderSettingsAdmin() {
     </div>
   </section>
 
-  <section class="admin-panel">
+  <section class="admin-panel" id="admin-data-settings">
     <h3>Database</h3>
     <div class="settings-note"><strong style="color:var(--gold-light)">Status:</strong> ${dbReady ? '<span style="color:#8fd4a8">✅ Connected</span>' : '<span style="color:#e7a4a4">❌ Not connected</span>'}</div>
     <button class="button button-outline" id="admin-reload-data" style="margin-top:12px">Reload from database</button>

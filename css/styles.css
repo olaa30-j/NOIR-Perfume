@@ -178,6 +178,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Native form controls (radio, checkbox, range, progress) follow the
+   store accent. accent-color inherits, so :root is enough. */
+:root {
+  accent-color: var(--accent);
+}
+
 [lang="ar"] body {
   font-size: 15px;
   line-height: 1.7;
